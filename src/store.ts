@@ -23,8 +23,8 @@ export function useTickets(): Ticket[] | null {
   return tickets;
 }
 
-export let pendingFile: File | null = null;
-export const setPendingFile = (f: File | null) => (pendingFile = f);
+export let pendingFiles: File[] = [];
+export const setPendingFiles = (f: File[]) => (pendingFiles = f);
 
 /** Valori distinti già usati (per autocomplete), dal più frequente. */
 export function distinct(list: Ticket[], pick: (t: Ticket) => (string | undefined)[]) {

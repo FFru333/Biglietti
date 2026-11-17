@@ -5,7 +5,8 @@ import { legsOf } from '../sort';
 import { deleteTicket } from '../db';
 import { isPdf } from '../files';
 import { needsUpgrade, upgradeTicket } from '../upgrade';
-import { isEvent, pagesOf } from '../types';
+import { filesOf, isEvent, pagesOf } from '../types';
+import { Booking, FlightHeader, Timeline } from './Flight';
 import { countdown, formatLong, formatTime } from '../dates';
 import { useWakeLock } from '../wakelock';
 import { BackIcon, ChevronIcon } from '../icons';
@@ -55,19 +56,22 @@ export function TicketView({ id }: { id: string }) {
   }
 
   const openOriginal = async () => {
-    const file = new File([t.file.blob], t.file.name, { type: t.file.mime });
+    const all = filesOf(t).map((x) => new File([x.blob], x.name, { type: x.mime }));
+    const file = all[0];
     const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
     // In modalità standalone su iOS l'apertura di blob: è inaffidabile; il foglio di
     // condivisione offre anteprima, "Salva su File" e "Apri in…".
     const standalone = matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone;
-    if (standalone && nav.canShare?.({ files: [file] })) {
-      try { await nav.share({ files: [file] }); } catch { /* annullato */ }
+    if (standalone && nav.canShare?.({ files: all })) {
+      try { await nav.share({ files: all }); } catch { /* annullato */ }
       return;
     }
     const u = URL.createObjectURL(file);
     window.open(u, '_blank', 'noopener');
     setTimeout(() => URL.revokeObjectURL(u), 60_000);
   };
+
+  const isFlight = !!t.segments?.length;
 
   const remove = async () => {
     await deleteTicket(t.id);
@@ -89,7 +93,18 @@ export function TicketView({ id }: { id: string }) {
         <span class="countdown num">{countdown(t.departAt)}</span>
       </header>
 
-      {t.seat && <p class="seat-strip num">{t.seat}</p>}
+      {isFlight && (
+        <>
+          <FlightHeader t={t} />
+          <Booking t={t} />
+          <Timeline segs={t.segments!} />
+          {t.seat && <p class="fl-seat num"><span class="fl-label">Posto</span>{t.seat}</p>}
+          {t.note && <p class="fl-note">{t.note}</p>}
+          <h2 class="fl-docs">{urls.length > 1 ? `Documenti · ${urls.length}` : 'Documento'}</h2>
+        </>
+      )}
+
+      {!isFlight && t.seat && <p class="seat-strip num">{t.seat}</p>}
 
       <div class="stage">
         {urls.length ? (
@@ -108,6 +123,7 @@ export function TicketView({ id }: { id: string }) {
       </div>
 
       <section class="details">
+        {!isFlight && <>
         <Tag t={t} />
         <h1 class="view-route"><Route t={t} /></h1>
         <dl class="facts num">
@@ -123,7 +139,10 @@ export function TicketView({ id }: { id: string }) {
           </div>
           {t.seat && <div><dt>Posto</dt><dd class="big seat">{t.seat}</dd></div>}
           {t.note && <div><dt>Note</dt><dd class="note">{t.note}</dd></div>}
+          {t.pnr && <div><dt>Codice prenotazione</dt><dd class="big">{t.pnr}</dd></div>}
+          {!!t.passengers?.length && <div><dt>Passeggeri</dt><dd class="note">{t.passengers.join('\n')}</dd></div>}
         </dl>
+        </>}
 
         <div class="actions">
           <a class="action" href={href.edit(t.id)}>Modifica</a>

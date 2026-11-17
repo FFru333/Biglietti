@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { useTickets, setPendingFile, distinct } from '../store';
+import { useTickets, setPendingFiles, distinct } from '../store';
 import { go, href } from '../router';
 import { split } from '../sort';
 import { GridIcon, ListIcon, PlusIcon } from '../icons';
@@ -47,10 +47,10 @@ export function Home() {
   };
 
   const onFile = (e: Event) => {
-    const f = (e.target as HTMLInputElement).files?.[0];
+    const fs = [...((e.target as HTMLInputElement).files ?? [])];
     (e.target as HTMLInputElement).value = '';
-    if (!f) return;
-    setPendingFile(f);
+    if (!fs.length) return;
+    setPendingFiles(fs);
     go(href.new);
   };
 
@@ -69,7 +69,7 @@ export function Home() {
             <PlusIcon />
           </button>
         </div>
-        <input ref={input} type="file" accept={ACCEPT} hidden onChange={onFile} />
+        <input ref={input} type="file" accept={ACCEPT} multiple hidden onChange={onFile} />
       </header>
 
       {trips.length > 0 && (
@@ -82,7 +82,7 @@ export function Home() {
       )}
 
       {all && all.length === 0 && (
-        <p class="empty">Nessun biglietto. Tocca + per aggiungere un PDF o una foto.</p>
+        <p class="empty">Nessun biglietto. Tocca + per aggiungere un PDF o degli screenshot.</p>
       )}
 
       {mode === 'grid' && <Grid future={future} past={past} showTrip={!activeTrip} />}

@@ -47,6 +47,19 @@ async function fakeTicket(title: string, sub: string, seed: number): Promise<Blo
   return new Promise((res) => c.toBlob((b) => res(b!), 'image/png'));
 }
 
+/** Voli demo come itinerari: andata con scalo a Francoforte, ritorno diretto. */
+function flightExtras(from: string, departAt: string): Partial<Ticket> {
+  const day = departAt.slice(0, 10);
+  const next = (d: string) => { const x = new Date(d); x.setDate(x.getDate() + 1); return toLocalInput(x).slice(0, 10); };
+  const segments = from === 'MUC'
+    ? [
+        { from: 'MUC', to: 'FRA', departAt: `${day}T07:05`, arriveAt: `${day}T08:00`, flight: 'LH 95', durationMin: 55, carrier: 'Lufthansa', cabin: 'Economy' },
+        { from: 'FRA', to: 'MEX', departAt: `${day}T10:15`, arriveAt: `${day}T15:20`, flight: 'LH 498', durationMin: 785, carrier: 'Lufthansa', aircraft: 'Boeing 747-8', cabin: 'Economy' },
+      ]
+    : [{ from: 'MEX', to: 'MUC', departAt: `${day}T20:30`, arriveAt: `${next(day)}T15:05`, flight: 'LH 499', durationMin: 695, carrier: 'Lufthansa', cabin: 'Economy' }];
+  return { segments, pnr: 'DEMO42', passengers: ['Mario Rossi', 'Anna Bianchi'] };
+}
+
 export async function loadDemo() {
   // tipo, da, a, partenza, arrivo, viaggio, posto, note
   const rows: [TicketType, string, string, string, string | undefined, string | undefined, string | undefined, string?][] = [
@@ -54,9 +67,8 @@ export async function loadDemo() {
     ['treno', 'Bologna C.le', 'Cesena', at(2, 9, 47), at(2, 10, 33), 'Natale', 'Carrozza 3 · Posto 12A', 'Regionale 17521'],
     ['treno', 'Cesena', 'Bologna C.le', at(6, 18, 12), at(6, 19, 2), 'Natale', undefined],
     ['evento', 'Concerto di Capodanno', 'Teatro Comunale, Bologna', at(14, 21, 0), undefined, 'Natale', 'Platea · Fila 12 · Posto 7'],
-    ['volo', 'MUC', 'FRA', at(21, 7, 5), at(21, 8, 0), 'Messico', 'Posto 12C', 'LH 95 · Scalo a Francoforte'],
-    ['volo', 'FRA', 'MEX', at(21, 10, 15), at(21, 15, 20), 'Messico', 'Posto 42K', 'LH 498'],
-    ['volo', 'MEX', 'MUC', at(35, 20, 30), at(36, 15, 5), 'Messico', 'Posto 38A', 'LH 499'],
+    ['volo', 'MUC', 'MEX', at(21, 7, 5), at(21, 15, 20), 'Messico', 'Posto 42K', undefined],
+    ['volo', 'MEX', 'MUC', at(35, 20, 30), at(36, 15, 5), 'Messico', 'Posto 38A', undefined],
   ];
   const now = Date.now();
   const tickets: Ticket[] = [];
@@ -67,6 +79,7 @@ export async function loadDemo() {
       id: uid(), type, from, to, departAt, arriveAt, trip, seat, note,
       file: { name: `demo-${i + 1}.png`, mime: 'image/png', blob, thumb: await makeThumb(blob) },
       createdAt: now + i, demo: true,
+      ...(type === 'volo' ? flightExtras(from, departAt) : {}),
     });
   }
   await putTickets(tickets);

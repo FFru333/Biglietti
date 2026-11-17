@@ -2,7 +2,7 @@
 
 Portafoglio personale di biglietti di viaggio. È una PWA che si installa sull'iPhone dalla schermata Home. Funziona offline, non ha account né backend: i dati restano nel dispositivo (IndexedDB).
 
-Stack: Vite, Preact, TypeScript, vite-plugin-pwa (Workbox), idb, pdfjs-dist (build legacy, worker incluso nel bundle). Il font è Inter Tight variable, self-hosted. A runtime non parte nessuna richiesta di rete.
+Stack: Vite, Preact, TypeScript, vite-plugin-pwa (Workbox), idb, pdfjs-dist (build legacy, worker incluso nel bundle), tesseract.js per l'OCR degli screenshot (motore WebAssembly SIMD e modello inglese compatto in `public/ocr`, nel precache: funziona offline, iOS 16.4+). Il font è Inter Tight variable, self-hosted. A runtime non parte nessuna richiesta di rete.
 
 ## Sviluppo
 
@@ -14,7 +14,7 @@ npm run preview    # serve dist/ (service worker attivo: per testare l'offline)
 npm run icons      # rigenera le icone in public/icons (non serve in CI)
 ```
 
-`predev` e `prebuild` copiano in `public/pdfjs/` i font standard e i decoder wasm di pdf.js. In questo modo anche i PDF che li richiedono vengono resi senza rete. La cartella è in `.gitignore`.
+`predev` e `prebuild` copiano in `public/pdfjs/` i font standard e i decoder wasm di pdf.js, e in `public/ocr/` worker, motore e modello di Tesseract. Così PDF e screenshot vengono letti senza rete. Le cartelle sono in `.gitignore`.
 
 ## Deploy su GitHub Pages
 
@@ -45,7 +45,7 @@ Non c'è sync. iOS può cancellare i dati di siti poco usati: l'app richiede `na
 
 ## Dati demo
 
-In Impostazioni, **Carica demo** aggiunge 7 biglietti finti (con posti e un concerto): treni München→Bologna (già passato), Bologna→Cesena e ritorno (viaggio "Natale"); voli MUC→FRA→MEX con scalo e ritorno MEX→MUC (viaggio "Messico"). Le date sono relative a oggi. **Rimuovi demo** li cancella con un tap, e i demo non finiscono mai nel backup.
+In Impostazioni, **Carica demo** aggiunge biglietti finti (treni con posti, un concerto, voli MUC→FRA→MEX con scalo e ritorno): treni München→Bologna (già passato), Bologna→Cesena e ritorno (viaggio "Natale"); voli MUC→FRA→MEX con scalo e ritorno MEX→MUC (viaggio "Messico"). Le date sono relative a oggi. **Rimuovi demo** li cancella con un tap, e i demo non finiscono mai nel backup.
 
 ## Scelte prese (dove la richiesta lasciava spazio)
 
@@ -59,6 +59,8 @@ In Impostazioni, **Carica demo** aggiunge 7 biglietti finti (con posti e un conc
 - **Anteprime.** È la vista iniziale della home; l'icona accanto al "+" passa a "Elenco" (sezioni per tipo, con "Prossimo"). Ogni biglietto è disegnato come un tagliando: in alto lo stub arancione con la data (g/m/aaaa) in nero, una perforazione con fori e tacche laterali, sotto la parte bianca con tratta, giorno e orari (evidenziati in arancione), posto, tipo/viaggio e countdown. Niente anteprima del PDF: tocca il tagliando per aprire il biglietto vero. Il tagliando ha colori propri, uguali in chiaro e in scuro.
 - **Posto.** Campo libero ("Carrozza 254 · Posto 46", "Posto 42K", "Settore B · Fila 12 · Posto 7"), letto dal PDF in italiano, tedesco, inglese, francese e spagnolo (Carrozza/Wagen/Wg., Posto/Platz/Pl./Sitzplatz/Seat, Settore/Block, Fila/Reihe/Row) e sempre riscritto con etichette italiane. Compare sulle card, in griglia e in alto nella vista biglietto. Il numero di treno o volo (ECE 85, LH 498) finisce nelle note.
 - **Eventi.** Tipo "Evento" per concerti, teatro, partite, musei: titolo e luogo invece di "Da → A", orari "Inizio/Fine". Il prefill riconosce l'evento e il luogo (arena, teatro, stadio…) e, se c'è, preferisce l'orario d'inizio all'apertura porte.
+- **Voli da screenshot o PDF di prenotazione.** Il "+" accetta più file insieme. Le immagini passano per l'OCR sul dispositivo (circa 1 s a screenshot su desktop), poi `src/itinerary.ts` cerca gli eventi "orario + aeroporto" e il numero di volo tra partenza e arrivo (pagine tipo "My Trip"). Gli screenshot che si sovrappongono vengono uniti senza doppioni; le tratte che si concatenano entro 24 ore formano un viaggio, quindi andata e ritorno diventano due biglietti collegati (stesso codice, stessi passeggeri e file). Si leggono anche durata, compagnia, aereo e classe, il codice di prenotazione ("Booking code", "Codice prenotazione", "Buchungscode"…) e i passeggeri (MR/MRS, COGNOME/NOME, elenchi sotto "Passengers"/"Passeggeri"). Nel form l'itinerario è modificabile tratta per tratta. Il recupero della prenotazione dal solo codice (come fa Wanderlog leggendo le email) non è possibile senza server e accesso alla posta, quindi non c'è.
+- **Vista volo.** Data, codici in grande, città, scali e durata totale; codice prenotazione copiabile con un tocco; passeggeri; timeline con orari, aeroporti, voli, durate e coincidenze (+1 per i giorni successivi); poi posto, note e i documenti originali (screenshot o pagine PDF). In griglia il volo ha lo stub nero e i codici aeroporto in grande, per distinguerlo dai treni.
 - **HEIC.** Se il browser lo sa decodificare, viene convertito in PNG per l'anteprima; l'originale resta comunque salvato. Da Foto, iOS di solito consegna già un JPEG.
 - **"File originale".** Nell'app installata su iOS apre il foglio di condivisione, che offre anteprima, "Salva su File" e "Apri in…": aprire URL `blob:` in modalità standalone su iOS è inaffidabile. Nel browser apre una nuova scheda.
 - **Prefill.** Il testo del PDF viene ricostruito riga per riga dalle posizioni dei frammenti (pdf.js li restituisce sparsi), così le tabelle restano allineate. Per partenza e arrivo, in ordine: intestazioni di colonna ("Stazione di partenza | Stazione di arrivo", "Von | Nach", "From | To", "Abfahrt | Ankunft"…) con il valore sotto o a destra; righe orario tipo DB ("München Hbf … ab 07:28"); "Da: X / A: Y"; "von X nach Y"; righe "X → Y"; codici IATA noti nell'ordine del testo; un elenco di stazioni italiane ed europee (`src/places.ts`), i nomi "… Hbf / Centrale / Termini" e i luoghi già usati. Orari e posto si leggono anche in colonna ("Departure" → 10:15, "Carrozza | Posti" → 5 | 12A). Si compilano solo i campi non ancora toccati, e se non trova nulla tace. Basta la data per salvare: senza tratta il titolo è il nome del file.

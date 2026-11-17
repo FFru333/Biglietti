@@ -1,6 +1,32 @@
 // Backup: un unico file JSON con metadati e allegati (base64). Leggibile, portabile, senza dipendenze.
 import { allTickets, putTickets, setMeta, getMeta } from './db';
-import type { Ticket } from './types';
+import type { StoredFile, Ticket } from './types';
+
+type JsonFile = { name: string; mime: string; data: string; render?: string; renders?: string[]; thumb?: string };
+
+async function fileOut(f: StoredFile & { thumb?: Blob }): Promise<JsonFile> {
+  return {
+    name: f.name,
+    mime: f.mime,
+    data: await blobToDataURL(f.blob),
+    // render coincide con renders[0]: non lo duplichiamo nel file.
+    render: f.render && !f.renders ? await blobToDataURL(f.render) : undefined,
+    renders: f.renders ? await Promise.all(f.renders.map(blobToDataURL)) : undefined,
+    thumb: f.thumb ? await blobToDataURL(f.thumb) : undefined,
+  };
+}
+
+async function fileIn(f: JsonFile): Promise<StoredFile & { thumb?: Blob }> {
+  const renders = Array.isArray(f.renders) ? await Promise.all(f.renders.map(dataURLToBlob)) : undefined;
+  return {
+    name: f.name,
+    mime: f.mime,
+    blob: await dataURLToBlob(f.data),
+    render: f.render ? await dataURLToBlob(f.render) : renders?.[0],
+    renders,
+    thumb: f.thumb ? await dataURLToBlob(f.thumb) : undefined,
+  };
+}
 
 const FORMAT = 'biglietti-backup';
 
@@ -27,15 +53,8 @@ export async function exportBackup(): Promise<File> {
   for (const t of tickets) {
     out.push({
       ...t,
-      file: {
-        name: t.file.name,
-        mime: t.file.mime,
-        data: await blobToDataURL(t.file.blob),
-        // render coincide con renders[0]: non lo duplichiamo nel file.
-        render: t.file.render && !t.file.renders ? await blobToDataURL(t.file.render) : undefined,
-        renders: t.file.renders ? await Promise.all(t.file.renders.map(blobToDataURL)) : undefined,
-        thumb: t.file.thumb ? await blobToDataURL(t.file.thumb) : undefined,
-      },
+      file: await fileOut(t.file),
+      more: t.more ? await Promise.all(t.more.map(fileOut)) : undefined,
     });
   }
   const now = new Date();
@@ -76,17 +95,10 @@ export async function importBackup(file: Blob): Promise<number> {
     if (!t?.id || !t?.file?.data) continue;
     tickets.push({
       ...t,
-      file: {
-        name: t.file.name,
-        mime: t.file.mime,
-        blob: await dataURLToBlob(t.file.data),
-        render: t.file.render ? await dataURLToBlob(t.file.render) : undefined,
-        renders: Array.isArray(t.file.renders) ? await Promise.all(t.file.renders.map(dataURLToBlob)) : undefined,
-        thumb: t.file.thumb ? await dataURLToBlob(t.file.thumb) : undefined,
-      },
+      file: await fileIn(t.file),
+      more: Array.isArray(t.more) ? await Promise.all(t.more.map(fileIn)) : undefined,
     });
   }
-  tickets.forEach((t) => { if (!t.file.render && t.file.renders?.length) t.file.render = t.file.renders[0]; });
   await putTickets(tickets);
   return tickets.length;
 }

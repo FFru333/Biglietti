@@ -34,9 +34,10 @@ const MONTH_RE = Object.keys(MONTHS).sort((a, b) => b.length - a.length).join('|
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-interface Hit { idx: number; y: number; m: number; d: number }
+export interface DateHit { idx: number; y: number; m: number; d: number }
+type Hit = DateHit;
 
-function findDates(text: string): Hit[] {
+export function findDates(text: string): Hit[] {
   const hits: Hit[] = [];
   const thisYear = new Date().getFullYear();
   const push = (idx: number, y: number, m: number, d: number) => {

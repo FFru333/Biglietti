@@ -1,91 +1,99 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { useTickets, reload, pendingFile, setPendingFile, distinct } from '../store';
+import { useTickets, reload, pendingFiles, setPendingFiles, distinct } from '../store';
 import { back, go, href } from '../router';
-import { putTicket, uid } from '../db';
-import { processFile, isPdf } from '../files';
-import { guessFromText } from '../parse';
+import { putTickets, uid } from '../db';
+import { analyze } from '../analyze';
+import { airportList } from '../places';
 import { SwapIcon, TypeIcon } from '../icons';
 import { ACCEPT } from './Home';
-import { TYPES, TYPE_LABEL, type Ticket, type TicketType } from '../types';
+import { TYPES, TYPE_LABEL, filesOf, type Segment, type StoredFile, type Ticket, type TicketType } from '../types';
 
-type Fields = { type: TicketType; from: string; to: string; departAt: string; arriveAt: string; trip: string; seat: string; note: string };
-const EMPTY: Fields = { type: 'treno', from: '', to: '', departAt: '', arriveAt: '', trip: '', seat: '', note: '' };
+type Fields = { type: TicketType; from: string; to: string; departAt: string; arriveAt: string; trip: string; seat: string; note: string; pnr: string; passengers: string };
+const EMPTY: Fields = { type: 'treno', from: '', to: '', departAt: '', arriveAt: '', trip: '', seat: '', note: '', pnr: '', passengers: '' };
+const emptySeg = (): Segment => ({ from: '', to: '', departAt: '', arriveAt: '' });
+
+/** Città dell'aeroporto (per il nome del viaggio proposto): "CUN" → "Cancún". */
+const cityOf = (code: string) => airportList().get(code)?.replace(/\s+(?:Malpensa|Linate|Fiumicino|Ciampino|Orly|Gatwick|Stansted|Luton|City|Narita|Haneda|Daxing|LaGuardia|Sabiha)$/, '') ?? code;
 
 export function TicketForm({ id }: { id?: string }) {
   const all = useTickets();
   const existing = id ? all?.find((t) => t.id === id) : undefined;
   const [f, setF] = useState<Fields>(EMPTY);
-  const [file, setFile] = useState<File | null>(id ? null : pendingFile);
-  const [processed, setProcessed] = useState<{ renders?: Blob[]; thumb?: Blob } | null>(null);
+  const [journeys, setJourneys] = useState<Segment[][]>([]);
+  const [files, setFiles] = useState<File[]>(id ? [] : pendingFiles);
+  const [stored, setStored] = useState<{ list: StoredFile[]; thumb?: Blob } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [reading, setReading] = useState(false);
+  const [progress, setProgress] = useState('');
   const [prefilled, setPrefilled] = useState(false);
   const touched = useRef(new Set<keyof Fields>());
   const replaceInput = useRef<HTMLInputElement>(null);
+  const reading = !!progress;
 
   // Nuovo senza file (es. ricarica della pagina): torna alla home.
   useEffect(() => {
-    if (!id && !pendingFile) go(href.home, true);
+    if (!id && !pendingFiles.length) go(href.home, true);
   }, []);
 
   // Modifica: carica i valori esistenti.
   useEffect(() => {
-    if (existing) {
-      setF({
-        type: existing.type, from: existing.from, to: existing.to, departAt: existing.departAt,
-        arriveAt: existing.arriveAt ?? '', trip: existing.trip ?? '', seat: existing.seat ?? '', note: existing.note ?? '',
-      });
-    }
+    if (!existing) return;
+    setF({
+      type: existing.type, from: existing.from, to: existing.to, departAt: existing.departAt,
+      arriveAt: existing.arriveAt ?? '', trip: existing.trip ?? '', seat: existing.seat ?? '', note: existing.note ?? '',
+      pnr: existing.pnr ?? '', passengers: (existing.passengers ?? []).join('\n'),
+    });
+    setJourneys(existing.segments?.length ? [existing.segments] : []);
   }, [existing?.id]);
 
   const places = useMemo(() => (all ? distinct(all, (t) => [t.from, t.to]) : []), [all]);
   const trips = useMemo(() => (all ? distinct(all, (t) => [t.trip]) : []), [all]);
 
-  // Elabora il file appena scelto: render + prefill best-effort (solo campi non toccati).
-  useEffect(() => {
-    if (!file) return;
-    let alive = true;
-    setReading(true);
-    setProcessed(null);
-    processFile(file)
-      .then((p) => {
-        if (!alive) return;
-        setProcessed({ renders: p.renders, thumb: p.thumb });
-        if (id) return; // in modifica non sovrascriviamo i dati
-        const g = guessFromText(p.text, places, p.rows);
-        const keys = (Object.keys(g) as (keyof typeof g)[]).filter((k) => g[k] && !touched.current.has(k));
-        if (keys.length) {
-          setF((cur) => {
-            const n = { ...cur };
-            keys.forEach((k) => ((n as Record<string, string>)[k] = g[k] as string));
-            return n;
-          });
-          setPrefilled(keys.some((k) => k !== 'type' && k !== 'note'));
-        }
-      })
-      .catch(() => alive && setProcessed({}))
-      .finally(() => alive && setReading(false));
-    return () => void (alive = false);
-  }, [file]);
-
-  // Modifica: rilegge il file già salvato e sovrascrive i campi riconosciuti.
-  const reread = async () => {
-    if (!existing || reading) return;
-    setReading(true);
+  /** Analizza i file e compila i campi. `overwrite`: sostituisce anche i campi già scritti. */
+  const run = async (list: File[], overwrite: boolean) => {
+    setProgress('Lettura…');
     try {
-      const src = new File([existing.file.blob], existing.file.name, { type: existing.file.mime });
-      const p = await processFile(src);
-      const g = guessFromText(p.text, places, p.rows);
-      const keys = (Object.keys(g) as (keyof typeof g)[]).filter((k) => g[k]);
+      const a = await analyze(list, places, setProgress);
+      setStored({ list: a.stored, thumb: a.thumb });
+      const it = a.itinerary;
+      const fill: Partial<Fields> = {};
+      if (it.journeys.length) {
+        // Volo: l'itinerario sostituisce partenza/arrivo singoli.
+        // In modifica si aggiorna solo il viaggio di questo biglietto (il ritorno ha già il suo).
+        setJourneys(existing
+          ? [it.journeys.find((js) => js[0].from === existing.from) ?? it.journeys[0]]
+          : it.journeys);
+        fill.type = 'volo';
+        const last = it.journeys[0][it.journeys[0].length - 1];
+        fill.trip = cityOf(last.to);
+      } else {
+        const g = a.guess;
+        Object.assign(fill, g);
+      }
+      if (it.pnr) fill.pnr = it.pnr;
+      if (it.passengers.length) fill.passengers = it.passengers.join('\n');
+      const keys = (Object.keys(fill) as (keyof Fields)[]).filter((k) => fill[k] && (overwrite || !touched.current.has(k)));
+      // Il nome del viaggio proposto non sovrascrive mai quello scelto.
+      const keep = (k: keyof Fields) => k === 'trip' && (f.trip || touched.current.has('trip'));
       setF((cur) => {
         const n = { ...cur };
-        keys.forEach((k) => ((n as Record<string, string>)[k] = g[k] as string));
+        keys.forEach((k) => { if (!keep(k)) (n as Record<string, string>)[k] = fill[k] as string; });
         return n;
       });
-      setPrefilled(keys.some((k) => k !== 'type' && k !== 'note'));
+      setPrefilled(it.journeys.length > 0 || keys.some((k) => k !== 'type' && k !== 'note'));
     } finally {
-      setReading(false);
+      setProgress('');
     }
+  };
+
+  // Elabora i file appena scelti.
+  useEffect(() => {
+    if (files.length) run(files, !!id);
+  }, [files]);
+
+  // Modifica: rilegge i file già salvati (PDF e screenshot, con OCR).
+  const reread = () => {
+    if (!existing || reading) return;
+    run(filesOf(existing).map((x) => new File([x.blob], x.name, { type: x.mime })), true);
   };
 
   const set = <K extends keyof Fields>(k: K, v: Fields[K]) => {
@@ -93,49 +101,80 @@ export function TicketForm({ id }: { id?: string }) {
     setF((cur) => ({ ...cur, [k]: v }));
   };
 
+  // ——— Itinerario ———
+  const flight = f.type === 'volo' && journeys.length > 0;
+  const setSeg = (j: number, s: number, patch: Partial<Segment>) =>
+    setJourneys((js) => js.map((segs, jj) => (jj !== j ? segs : segs.map((x, ss) => (ss === s ? { ...x, ...patch } : x)))));
+  const addSeg = (j: number) =>
+    setJourneys((js) => js.map((segs, jj) => {
+      if (jj !== j) return segs;
+      const last = segs[segs.length - 1];
+      return [...segs, { ...emptySeg(), from: last?.to ?? '' }];
+    }));
+  const removeSeg = (j: number, s: number) =>
+    setJourneys((js) => js.map((segs, jj) => (jj === j ? segs.filter((_, ss) => ss !== s) : segs)).filter((segs) => segs.length));
+  const startItinerary = () => setJourneys([[{ ...emptySeg(), from: f.from, to: f.to, departAt: f.departAt, arriveAt: f.arriveAt }]]);
+
   const ev = f.type === 'evento';
-  // Basta la data: se la tratta non è stata letta, il biglietto si salva lo stesso (titolo = nome del file).
-  const valid = f.departAt && (file || existing) && !reading;
+  const segsOk = journeys.every((segs) => segs.every((x) => x.from.trim() && x.to.trim() && x.departAt));
+  const valid = (flight ? segsOk : !!f.departAt) && (files.length || existing) && !reading;
 
   const save = async (e: Event) => {
     e.preventDefault();
     if (!valid || busy) return;
     setBusy(true);
     try {
-      const fileData: Ticket['file'] = file
-        ? {
-            name: file.name || 'biglietto',
-            mime: file.type || (isPdf(file) ? 'application/pdf' : 'application/octet-stream'),
-            blob: file,
-            render: processed?.renders?.[0],
-            renders: processed?.renders,
-            thumb: processed?.thumb,
-          }
-        : existing!.file;
-      const t: Ticket = {
-        id: existing?.id ?? uid(),
-        createdAt: existing?.createdAt ?? Date.now(),
-        type: f.type,
-        from: f.from.trim(),
-        to: f.to.trim(),
-        departAt: f.departAt,
-        arriveAt: f.arriveAt || undefined,
+      const list = stored?.list.length ? stored.list : existing ? filesOf(existing) : [];
+      const fileData: Ticket['file'] = files.length && stored ? { ...list[0], thumb: stored.thumb } : existing!.file;
+      const more = files.length && stored ? list.slice(1) : existing?.more;
+      const passengers = f.passengers.split('\n').map((x) => x.trim()).filter(Boolean);
+      const common = {
         trip: f.trip.trim() || undefined,
         seat: f.seat.trim() || undefined,
         note: f.note.trim() || undefined,
+        pnr: f.pnr.trim().toUpperCase() || undefined,
+        passengers: passengers.length ? passengers : undefined,
         file: fileData,
+        more: more?.length ? more : undefined,
       };
-      await putTicket(t);
-      setPendingFile(null);
+      const now = Date.now();
+      const tickets: Ticket[] = flight
+        ? journeys.map((segs, j) => {
+            const clean = segs.map((x) => ({ ...x, from: x.from.trim().toUpperCase(), to: x.to.trim().toUpperCase(), flight: x.flight?.trim() || undefined }));
+            return {
+              ...common,
+              id: j === 0 && existing ? existing.id : uid(),
+              createdAt: j === 0 && existing ? existing.createdAt : now + j,
+              type: 'volo' as const,
+              from: clean[0].from,
+              to: clean[clean.length - 1].to,
+              departAt: clean[0].departAt,
+              arriveAt: clean[clean.length - 1].arriveAt || undefined,
+              segments: clean,
+            };
+          })
+        : [{
+            ...common,
+            id: existing?.id ?? uid(),
+            createdAt: existing?.createdAt ?? now,
+            type: f.type,
+            from: f.from.trim(),
+            to: f.to.trim(),
+            departAt: f.departAt,
+            arriveAt: f.arriveAt || undefined,
+            segments: undefined,
+          }];
+      await putTickets(tickets);
+      setPendingFiles([]);
       await reload();
-      go(href.view(t.id), true);
+      go(href.view(tickets[0].id), true);
     } finally {
       setBusy(false);
     }
   };
 
   const cancel = () => {
-    setPendingFile(null);
+    setPendingFiles([]);
     back();
   };
 
@@ -145,7 +184,9 @@ export function TicketForm({ id }: { id?: string }) {
   };
 
   if (id && all && !existing) return <main class="page"><p class="empty">Biglietto non trovato.</p></main>;
-  const fileName = file?.name ?? existing?.file.name ?? '';
+  const names = files.length ? files.map((x) => x.name) : existing ? filesOf(existing).map((x) => x.name) : [];
+  const fileLabel = names.length > 1 ? `${names.length} file` : names[0] ?? '';
+  const journeyLabel = (j: number) => (journeys.length === 2 ? (j === 0 ? 'Andata' : 'Ritorno') : journeys.length > 2 ? `Viaggio ${j + 1}` : 'Itinerario');
 
   return (
     <main class="page form-page">
@@ -157,18 +198,18 @@ export function TicketForm({ id }: { id?: string }) {
         </header>
 
         <div class="file-row">
-          <span class="file-name">{fileName}</span>
+          <span class="file-name">{fileLabel}</span>
           <span class="file-state">
-            {reading ? 'Lettura…' : prefilled ? 'Campi letti dal file: controlla' : ''}
+            {progress || (prefilled ? 'Campi letti dal file: controlla' : '')}
           </span>
           {id && (
             <>
-              {!file && isPdf({ type: existing?.file.mime ?? '', name: existing?.file.name ?? '' }) && (
+              {!files.length && (
                 <button type="button" class="text-btn small" onClick={reread} disabled={reading}>Rileggi dal file</button>
               )}
               <button type="button" class="text-btn small" onClick={() => replaceInput.current?.click()}>Sostituisci</button>
-              <input ref={replaceInput} type="file" accept={ACCEPT} hidden
-                onChange={(e) => { const x = (e.target as HTMLInputElement).files?.[0]; if (x) setFile(x); }} />
+              <input ref={replaceInput} type="file" accept={ACCEPT} multiple hidden
+                onChange={(e) => { const x = [...((e.target as HTMLInputElement).files ?? [])]; if (x.length) setFiles(x); }} />
             </>
           )}
         </div>
@@ -182,33 +223,79 @@ export function TicketForm({ id }: { id?: string }) {
         </div>
 
         <div class="fields">
-          <div class="route-fields">
-            <label class="field">
-              <span class="label">{ev ? 'Evento' : 'Da'}</span>
-              <input value={f.from} onInput={(e) => set('from', e.currentTarget.value)} list="places"
-                autocomplete="off" autocapitalize="words" placeholder={ev ? 'Concerto, mostra, partita…' : 'München Hbf'} />
-            </label>
-            {!ev && <button type="button" class="swap" aria-label="Inverti partenza e arrivo" onClick={swap}><SwapIcon /></button>}
-            <label class="field">
-              <span class="label">{ev ? <>Luogo <i>facoltativo</i></> : 'A'}</span>
-              <input value={f.to} onInput={(e) => set('to', e.currentTarget.value)} list="places"
-                autocomplete="off" autocapitalize="words" placeholder={ev ? 'Unipol Arena' : 'Bologna C.le'} />
-            </label>
-          </div>
-          <datalist id="places">{places.map((p) => <option key={p} value={p} />)}</datalist>
+          {flight ? (
+            journeys.map((segs, j) => (
+              <section class="itin-edit" key={j}>
+                <h2 class="label">{journeyLabel(j)}</h2>
+                {segs.map((x, s) => (
+                  <div class="seg-edit" key={s}>
+                    <div class="seg-row">
+                      <input class="code" value={x.from} maxLength={3} autocapitalize="characters" placeholder="BLQ" aria-label="Da (codice aeroporto)"
+                        onInput={(e) => setSeg(j, s, { from: e.currentTarget.value.toUpperCase() })} />
+                      <span class="seg-arrow" aria-hidden="true">→</span>
+                      <input class="code" value={x.to} maxLength={3} autocapitalize="characters" placeholder="AMS" aria-label="A (codice aeroporto)"
+                        onInput={(e) => setSeg(j, s, { to: e.currentTarget.value.toUpperCase() })} />
+                      <input class="flight" value={x.flight ?? ''} autocapitalize="characters" placeholder="KL 1660" aria-label="Volo"
+                        onInput={(e) => setSeg(j, s, { flight: e.currentTarget.value.toUpperCase() })} />
+                      <button type="button" class="seg-del" aria-label="Rimuovi tratta" onClick={() => removeSeg(j, s)}>×</button>
+                    </div>
+                    <div class="seg-row times">
+                      <input type="datetime-local" class="num" value={x.departAt} aria-label="Partenza"
+                        onInput={(e) => setSeg(j, s, { departAt: e.currentTarget.value })} />
+                      <input type="datetime-local" class="num" value={x.arriveAt} min={x.departAt || undefined} aria-label="Arrivo"
+                        onInput={(e) => setSeg(j, s, { arriveAt: e.currentTarget.value })} />
+                    </div>
+                  </div>
+                ))}
+                <button type="button" class="text-btn small" onClick={() => addSeg(j)}>+ Aggiungi tratta</button>
+              </section>
+            ))
+          ) : (
+            <>
+              <div class="route-fields">
+                <label class="field">
+                  <span class="label">{ev ? 'Evento' : 'Da'}</span>
+                  <input value={f.from} onInput={(e) => set('from', e.currentTarget.value)} list="places"
+                    autocomplete="off" autocapitalize="words" placeholder={ev ? 'Concerto, mostra, partita…' : 'München Hbf'} />
+                </label>
+                {!ev && <button type="button" class="swap" aria-label="Inverti partenza e arrivo" onClick={swap}><SwapIcon /></button>}
+                <label class="field">
+                  <span class="label">{ev ? <>Luogo <i>facoltativo</i></> : 'A'}</span>
+                  <input value={f.to} onInput={(e) => set('to', e.currentTarget.value)} list="places"
+                    autocomplete="off" autocapitalize="words" placeholder={ev ? 'Unipol Arena' : 'Bologna C.le'} />
+                </label>
+              </div>
+              <datalist id="places">{places.map((p) => <option key={p} value={p} />)}</datalist>
 
-          <div class="pair-fields">
-            <label class="field">
-              <span class="label">{ev ? 'Inizio' : 'Partenza'}</span>
-              <input type="datetime-local" class="num" value={f.departAt} required
-                onInput={(e) => set('departAt', e.currentTarget.value)} />
-            </label>
-            <label class="field">
-              <span class="label">{ev ? 'Fine' : 'Arrivo'} <i>facoltativo</i></span>
-              <input type="datetime-local" class="num" value={f.arriveAt} min={f.departAt || undefined}
-                onInput={(e) => set('arriveAt', e.currentTarget.value)} />
-            </label>
-          </div>
+              <div class="pair-fields">
+                <label class="field">
+                  <span class="label">{ev ? 'Inizio' : 'Partenza'}</span>
+                  <input type="datetime-local" class="num" value={f.departAt} required
+                    onInput={(e) => set('departAt', e.currentTarget.value)} />
+                </label>
+                <label class="field">
+                  <span class="label">{ev ? 'Fine' : 'Arrivo'} <i>facoltativo</i></span>
+                  <input type="datetime-local" class="num" value={f.arriveAt} min={f.departAt || undefined}
+                    onInput={(e) => set('arriveAt', e.currentTarget.value)} />
+                </label>
+              </div>
+              {f.type === 'volo' && (
+                <button type="button" class="text-btn small" onClick={startItinerary}>+ Itinerario con scali</button>
+              )}
+            </>
+          )}
+
+          <label class="field">
+            <span class="label">Codice prenotazione <i>facoltativo</i></span>
+            <input value={f.pnr} onInput={(e) => set('pnr', e.currentTarget.value.toUpperCase())} autocomplete="off"
+              autocapitalize="characters" class="num" placeholder="XM2GIK" />
+          </label>
+
+          <label class="field">
+            <span class="label">Passeggeri <i>uno per riga</i></span>
+            <textarea rows={2} value={f.passengers} onInput={(e) => set('passengers', e.currentTarget.value)}
+              autocapitalize="words" placeholder="Nome Cognome" />
+          </label>
 
           <label class="field">
             <span class="label">Posto <i>facoltativo</i></span>
@@ -226,7 +313,7 @@ export function TicketForm({ id }: { id?: string }) {
           <label class="field">
             <span class="label">Note <i>facoltativo</i></span>
             <textarea rows={2} value={f.note} onInput={(e) => set('note', e.currentTarget.value)}
-              placeholder="Numero treno o volo, codice prenotazione" />
+              placeholder="Numero treno o volo, bagaglio…" />
           </label>
         </div>
       </form>
