@@ -8,8 +8,17 @@ import { SwapIcon, TypeIcon } from '../icons';
 import { ACCEPT } from './Home';
 import { TYPES, TYPE_LABEL, filesOf, type Segment, type StoredFile, type Ticket, type TicketType } from '../types';
 
-type Fields = { type: TicketType; from: string; to: string; departAt: string; arriveAt: string; trip: string; seat: string; note: string; pnr: string; passengers: string };
-const EMPTY: Fields = { type: 'treno', from: '', to: '', departAt: '', arriveAt: '', trip: '', seat: '', note: '', pnr: '', passengers: '' };
+type Fields = { type: TicketType; from: string; to: string; departAt: string; arriveAt: string; trip: string; seat: string; note: string; pnr: string };
+const EMPTY: Fields = { type: 'treno', from: '', to: '', departAt: '', arriveAt: '', trip: '', seat: '', note: '', pnr: '' };
+type Pax = { first: string; last: string };
+/** "Mario De Rossi" → nome "Mario", cognome "De Rossi" (le particelle restano col cognome). */
+const splitName = (full: string): Pax => {
+  const w = full.trim().split(/\s+/).filter(Boolean);
+  if (w.length < 2) return { first: w[0] ?? '', last: '' };
+  let k = w.length - 1;
+  while (k > 1 && /^(de|di|da|del|della|dello|dei|degli|lo|la|van|von|der|le|du|dos|das|mc)$/i.test(w[k - 1])) k--;
+  return { first: w.slice(0, k).join(' '), last: w.slice(k).join(' ') };
+};
 const emptySeg = (): Segment => ({ from: '', to: '', departAt: '', arriveAt: '' });
 
 /** Città dell'aeroporto (per il nome del viaggio proposto): "CUN" → "Cancún". */
@@ -19,6 +28,8 @@ export function TicketForm({ id }: { id?: string }) {
   const all = useTickets();
   const existing = id ? all?.find((t) => t.id === id) : undefined;
   const [f, setF] = useState<Fields>(EMPTY);
+  const [pax, setPax] = useState<Pax[]>([]);
+  const paxTouched = useRef(false);
   const [journeys, setJourneys] = useState<Segment[][]>([]);
   const [files, setFiles] = useState<File[]>(id ? [] : pendingFiles);
   const [stored, setStored] = useState<{ list: StoredFile[]; thumb?: Blob } | null>(null);
@@ -40,8 +51,9 @@ export function TicketForm({ id }: { id?: string }) {
     setF({
       type: existing.type, from: existing.from, to: existing.to, departAt: existing.departAt,
       arriveAt: existing.arriveAt ?? '', trip: existing.trip ?? '', seat: existing.seat ?? '', note: existing.note ?? '',
-      pnr: existing.pnr ?? '', passengers: (existing.passengers ?? []).join('\n'),
+      pnr: existing.pnr ?? '',
     });
+    setPax((existing.passengers ?? []).map(splitName));
     setJourneys(existing.segments?.length ? [existing.segments] : []);
   }, [existing?.id]);
 
@@ -70,7 +82,7 @@ export function TicketForm({ id }: { id?: string }) {
         Object.assign(fill, g);
       }
       if (it.pnr) fill.pnr = it.pnr;
-      if (it.passengers.length) fill.passengers = it.passengers.join('\n');
+      if (it.passengers.length && (overwrite || !paxTouched.current)) setPax(it.passengers.map(splitName));
       const keys = (Object.keys(fill) as (keyof Fields)[]).filter((k) => fill[k] && (overwrite || !touched.current.has(k)));
       // Il nome del viaggio proposto non sovrascrive mai quello scelto.
       const keep = (k: keyof Fields) => k === 'trip' && (f.trip || touched.current.has('trip'));
@@ -94,6 +106,11 @@ export function TicketForm({ id }: { id?: string }) {
   const reread = () => {
     if (!existing || reading) return;
     run(filesOf(existing).map((x) => new File([x.blob], x.name, { type: x.mime })), true);
+  };
+
+  const editPax = (next: Pax[]) => {
+    paxTouched.current = true;
+    setPax(next);
   };
 
   const set = <K extends keyof Fields>(k: K, v: Fields[K]) => {
@@ -127,7 +144,7 @@ export function TicketForm({ id }: { id?: string }) {
       const list = stored?.list.length ? stored.list : existing ? filesOf(existing) : [];
       const fileData: Ticket['file'] = files.length && stored ? { ...list[0], thumb: stored.thumb } : existing!.file;
       const more = files.length && stored ? list.slice(1) : existing?.more;
-      const passengers = f.passengers.split('\n').map((x) => x.trim()).filter(Boolean);
+      const passengers = pax.map((p) => `${p.first.trim()} ${p.last.trim()}`.trim()).filter(Boolean);
       const common = {
         trip: f.trip.trim() || undefined,
         seat: f.seat.trim() || undefined,
@@ -291,11 +308,32 @@ export function TicketForm({ id }: { id?: string }) {
               autocapitalize="characters" class="num" placeholder="XM2GIK" />
           </label>
 
-          <label class="field">
-            <span class="label">Passeggeri <i>uno per riga</i></span>
-            <textarea rows={2} value={f.passengers} onInput={(e) => set('passengers', e.currentTarget.value)}
-              autocapitalize="words" placeholder="Nome Cognome" />
-          </label>
+<div class="pax-edit" role="group" aria-labelledby="pax-label">
+            <div class="pax-head">
+              <span class="label" id="pax-label">Passeggeri <i>{pax.length ? '' : 'facoltativo'}</i></span>
+              <div class="pax-count" role="group" aria-label="Numero di passeggeri">
+                <button type="button" aria-label="Un passeggero in meno" disabled={!pax.length} onClick={() => editPax(pax.slice(0, -1))}>−</button>
+                <output class="num" aria-live="polite">{pax.length}</output>
+                <button type="button" aria-label="Un passeggero in più" disabled={pax.length >= 9} onClick={() => editPax([...pax, { first: '', last: '' }])}>+</button>
+              </div>
+            </div>
+            {pax.length > 0 && (
+              <div class="pax-row pax-cols" aria-hidden="true"><span /><span class="label">Nome</span><span class="label">Cognome</span></div>
+            )}
+            {pax.map((p, k) => (
+              <div class="pax-row" key={k}>
+                <span class="pax-no num">{k + 1}</span>
+                <label class="field">
+                  <input aria-label={`Nome passeggero ${k + 1}`} value={p.first} autocapitalize="words" autocomplete="off" enterkeyhint="next"
+                    onInput={(e) => editPax(pax.map((x, i) => (i === k ? { ...x, first: e.currentTarget.value } : x)))} />
+                </label>
+                <label class="field">
+                  <input aria-label={`Cognome passeggero ${k + 1}`} value={p.last} autocapitalize="words" autocomplete="off" enterkeyhint="next"
+                    onInput={(e) => editPax(pax.map((x, i) => (i === k ? { ...x, last: e.currentTarget.value } : x)))} />
+                </label>
+              </div>
+            ))}
+          </div>
 
           <label class="field">
             <span class="label">Posto <i>facoltativo</i></span>

@@ -768,16 +768,24 @@ button:disabled { cursor: default; opacity: 0.35; }
 
 .fl-seat, .fl-note { margin: 0 0 20px; font-size: 18px; font-weight: 450; }
 .fl-note { font-size: 15px; color: var(--ink-soft); white-space: pre-wrap; }
-.fl-docs {
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-  padding-bottom: 8px;
+.fl-source {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: center;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px 0;
+  border-top: 1px solid var(--rule);
   border-bottom: 1px solid var(--rule);
   margin: 8px 0 0;
+  text-align: left;
 }
+.fl-source .fl-label { grid-column: 1; }
+.fl-source-name { grid-column: 1; font-size: 15px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-source-open { grid-column: 2; grid-row: 1 / span 2; font-size: 15px; font-weight: 600; color: var(--accent); }
 
 /* ——— Editor itinerario nel form ——— */
 
@@ -806,3 +814,16 @@ button:disabled { cursor: default; opacity: 0.35; }
 .seg-row.times input::-webkit-calendar-picker-indicator { display: none; }
 .seg-arrow { opacity: 0.5; }
 .seg-del { width: 32px; height: 40px; font-size: 22px; line-height: 1; color: var(--ink-soft); }
+
+/* ——— Passeggeri nel form ——— */
+
+.pax-edit { display: grid; gap: 6px; }
+.pax-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pax-count { display: flex; align-items: center; gap: 2px; border: 1px solid var(--rule-strong); border-radius: 999px; }
+.pax-count button { width: 44px; height: 36px; font-size: 20px; line-height: 1; }
+.pax-count button:disabled { opacity: 0.3; }
+.pax-count output { min-width: 1.6em; text-align: center; font-size: 17px; font-weight: 600; }
+.pax-row { display: grid; grid-template-columns: 1.4em minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: end; }
+.pax-no { font-size: 13px; color: var(--ink-soft); padding-bottom: 12px; }
+.pax-row .field input { font-size: 17px; }
+.pax-cols .label { font-size: 10.5px; color: var(--ink-soft); margin-bottom: -6px; }

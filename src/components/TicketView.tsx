@@ -100,13 +100,17 @@ export function TicketView({ id }: { id: string }) {
           <Timeline segs={t.segments!} />
           {t.seat && <p class="fl-seat num"><span class="fl-label">Posto</span>{t.seat}</p>}
           {t.note && <p class="fl-note">{t.note}</p>}
-          <h2 class="fl-docs">{urls.length > 1 ? `Documenti · ${urls.length}` : 'Documento'}</h2>
+          <button class="fl-source" onClick={openOriginal}>
+            <span class="fl-label">Documento originale</span>
+            <span class="fl-source-name">{t.file.name}{t.more?.length ? ` + ${t.more.length}` : ''}</span>
+            <span class="fl-source-open" aria-hidden="true">Apri</span>
+          </button>
         </>
       )}
 
       {!isFlight && t.seat && <p class="seat-strip num">{t.seat}</p>}
 
-      <div class="stage">
+      {!isFlight && <div class="stage">
         {urls.length ? (
           urls.map((u, n) => (
             <div class="sheet" key={u}>
@@ -120,7 +124,7 @@ export function TicketView({ id }: { id: string }) {
             <button class="text-btn" onClick={openOriginal}>Apri il file originale</button>
           </div>
         )}
-      </div>
+      </div>}
 
       <section class="details">
         {!isFlight && <>
@@ -146,7 +150,7 @@ export function TicketView({ id }: { id: string }) {
 
         <div class="actions">
           <a class="action" href={href.edit(t.id)}>Modifica</a>
-          <button class="action" onClick={openOriginal}>File originale</button>
+          {!isFlight && <button class="action" onClick={openOriginal}>File originale</button>}
           {confirm ? (
             <span class="confirm">
               <button class="action danger" onClick={remove}>Elimina davvero</button>
