@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 import { useTickets, reload } from '../store';
 import { back, go, href } from '../router';
 import { legsOf } from '../sort';
-import { deleteTicket, putTicket } from '../db';
-import { isPdf, processFile } from '../files';
+import { deleteTicket } from '../db';
+import { isPdf } from '../files';
+import { needsUpgrade, upgradeTicket } from '../upgrade';
+import { isEvent, pagesOf } from '../types';
 import { countdown, formatLong, formatTime } from '../dates';
 import { useWakeLock } from '../wakelock';
 import { BackIcon, ChevronIcon } from '../icons';
@@ -18,20 +20,13 @@ export function TicketView({ id }: { id: string }) {
   const [confirm, setConfirm] = useState(false);
   useWakeLock();
 
-  const shown = t?.file.render ?? (t && t.file.mime.startsWith('image/') ? t.file.blob : undefined);
-  const url = useMemo(() => (shown ? URL.createObjectURL(shown) : ''), [shown]);
-  useEffect(() => () => void (url && URL.revokeObjectURL(url)), [url]);
+  const pages = useMemo(() => (t ? pagesOf(t) : []), [t]);
+  const urls = useMemo(() => pages.map((b) => URL.createObjectURL(b)), [pages]);
+  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
 
-  // Anteprima mancante (es. elaborazione interrotta): la generiamo ora e la salviamo.
+  // Pagine o miniatura mancanti (biglietti salvati prima, o elaborazione interrotta): le generiamo ora.
   useEffect(() => {
-    if (!t || t.file.render || !isPdf({ type: t.file.mime, name: t.file.name })) return;
-    let alive = true;
-    processFile(new File([t.file.blob], t.file.name, { type: t.file.mime }), 30_000).then(async (p) => {
-      if (!alive || !p.render) return;
-      await putTicket({ ...t, file: { ...t.file, render: p.render } });
-      await reload();
-    });
-    return () => void (alive = false);
+    if (t && needsUpgrade(t)) upgradeTicket(t).then((ok) => { if (ok) reload(); });
   }, [t?.id]);
 
   const step = useCallback((dir: 1 | -1) => {
@@ -84,22 +79,29 @@ export function TicketView({ id }: { id: string }) {
     <main class="page view">
       <header class="bar view-bar">
         <button class="icon-btn" aria-label="Chiudi" onClick={back}><BackIcon /></button>
-        {legs.length > 1 && (
+        {legs.length > 1 ? (
           <div class="legs num" aria-label={`Tratta ${i + 1} di ${legs.length}`}>
             <button class="icon-btn small flip" aria-label="Tratta precedente" disabled={i <= 0} onClick={() => step(-1)}><ChevronIcon /></button>
             <span>{i + 1} / {legs.length}</span>
             <button class="icon-btn small" aria-label="Tratta successiva" disabled={i >= legs.length - 1} onClick={() => step(1)}><ChevronIcon /></button>
           </div>
-        )}
+        ) : <span />}
         <span class="countdown num">{countdown(t.departAt)}</span>
       </header>
 
+      {t.seat && <p class="seat-strip num">{t.seat}</p>}
+
       <div class="stage">
-        {url ? (
-          <Zoom src={url} alt={`Biglietto ${t.from} – ${t.to}`} onSwipe={legs.length > 1 ? step : undefined} />
+        {urls.length ? (
+          urls.map((u, n) => (
+            <div class="sheet" key={u}>
+              {urls.length > 1 && <span class="sheet-no num">{n + 1} / {urls.length}</span>}
+              <Zoom src={u} alt={`Biglietto ${t.from}${t.to ? ` – ${t.to}` : ''}, pagina ${n + 1}`} onSwipe={legs.length > 1 ? step : undefined} />
+            </div>
+          ))
         ) : (
           <div class="stage-empty">
-            <p>{isPdf({ type: t.file.mime, name: t.file.name }) ? 'Preparazione anteprima…' : 'Anteprima non disponibile.'}</p>
+            <p>{isPdf({ type: t.file.mime, name: t.file.name }) ? 'Preparazione del biglietto…' : 'Anteprima non disponibile.'}</p>
             <button class="text-btn" onClick={openOriginal}>Apri il file originale</button>
           </div>
         )}
@@ -110,14 +112,16 @@ export function TicketView({ id }: { id: string }) {
         <h1 class="view-route"><Route t={t} /></h1>
         <dl class="facts num">
           <div><dt>Data</dt><dd>{formatLong(t.departAt)}</dd></div>
+          {isEvent(t) && t.to && <div><dt>Luogo</dt><dd>{t.to}</dd></div>}
           <div class="pair">
-            <div><dt>Partenza</dt><dd class="big">{formatTime(t.departAt)}</dd></div>
+            <div><dt>{isEvent(t) ? 'Inizio' : 'Partenza'}</dt><dd class="big">{formatTime(t.departAt)}</dd></div>
             {t.arriveAt && (
-              <div><dt>Arrivo</dt><dd class="big">{formatTime(t.arriveAt)}
+              <div><dt>{isEvent(t) ? 'Fine' : 'Arrivo'}</dt><dd class="big">{formatTime(t.arriveAt)}
                 {plusDays(t) > 0 && <sup class="plus-day">+{plusDays(t)}</sup>}
               </dd></div>
             )}
           </div>
+          {t.seat && <div><dt>Posto</dt><dd class="big seat">{t.seat}</dd></div>}
           {t.note && <div><dt>Note</dt><dd class="note">{t.note}</dd></div>}
         </dl>
 

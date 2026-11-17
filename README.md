@@ -45,7 +45,7 @@ Non c'è sync. iOS può cancellare i dati di siti poco usati: l'app richiede `na
 
 ## Dati demo
 
-In Impostazioni, **Carica demo** aggiunge 6 biglietti finti: treni München→Bologna (già passato), Bologna→Cesena e ritorno (viaggio "Natale"); voli MUC→FRA→MEX con scalo e ritorno MEX→MUC (viaggio "Messico"). Le date sono relative a oggi. **Rimuovi demo** li cancella con un tap, e i demo non finiscono mai nel backup.
+In Impostazioni, **Carica demo** aggiunge 7 biglietti finti (con posti e un concerto): treni München→Bologna (già passato), Bologna→Cesena e ritorno (viaggio "Natale"); voli MUC→FRA→MEX con scalo e ritorno MEX→MUC (viaggio "Messico"). Le date sono relative a oggi. **Rimuovi demo** li cancella con un tap, e i demo non finiscono mai nel backup.
 
 ## Scelte prese (dove la richiesta lasciava spazio)
 
@@ -55,10 +55,13 @@ In Impostazioni, **Carica demo** aggiunge 6 biglietti finti: treni München→Bo
 - **Quando un biglietto diventa "passato".** All'orario di arrivo se c'è, altrimenti 3 ore dopo la partenza. Così un treno in corso resta tra i futuri.
 - **Fuso orario.** Gli orari sono salvati "come stampati" (`YYYY-MM-DDTHH:mm`, senza fuso). Countdown e ordinamento li interpretano nel fuso del telefono. Un volo per il Messico mostra quindi l'orario locale corretto, ma il countdown può sbagliare di qualche ora quando i fusi sono diversi. È una scelta voluta, per non dover gestire i fusi.
 - **Arrivo il giorno dopo.** Viene indicato con un piccolo "+1" accanto all'orario.
-- **Anteprima.** All'import si renderizza la prima pagina del PDF (circa 2200 px, PNG) e se ne ritagliano i margini bianchi, così il codice occupa più schermo. L'anteprima si salva insieme all'originale e l'apertura è immediata. Se il render fallisce o va in timeout, viene rigenerato alla prima apertura del biglietto.
+- **Il biglietto vero.** All'import si renderizzano tutte le pagine del PDF (fino a 8, circa 2000 px, PNG) e la vista biglietto le mostra una sotto l'altra, ognuna zoomabile. La prima pagina è ritagliata sui margini bianchi, così il codice occupa più schermo; le altre solo sopra e sotto. Le pagine bianche vengono saltate. I biglietti salvati con versioni precedenti vengono completati in automatico alla prima apertura.
+- **Anteprime.** In home, l'icona accanto al "+" alterna "Elenco" (sezioni per tipo, con "Prossimo") e "Anteprime": una griglia cronologica con la miniatura del biglietto, il giorno in grande, mese, giorno della settimana e ora. La scelta viene ricordata. Questo supera la regola iniziale "niente anteprima nella card", su richiesta.
+- **Posto.** Campo libero ("Carrozza 254 · Posto 46", "Posto 42K", "Settore B · Fila 12 · Posto 7"), letto dal PDF in italiano, tedesco, inglese, francese e spagnolo (Carrozza/Wagen/Wg., Posto/Platz/Pl./Sitzplatz/Seat, Settore/Block, Fila/Reihe/Row) e sempre riscritto con etichette italiane. Compare sulle card, in griglia e in alto nella vista biglietto. Il numero di treno o volo (ECE 85, LH 498) finisce nelle note.
+- **Eventi.** Tipo "Evento" per concerti, teatro, partite, musei: titolo e luogo invece di "Da → A", orari "Inizio/Fine". Il prefill riconosce l'evento e il luogo (arena, teatro, stadio…) e, se c'è, preferisce l'orario d'inizio all'apertura porte.
 - **HEIC.** Se il browser lo sa decodificare, viene convertito in PNG per l'anteprima; l'originale resta comunque salvato. Da Foto, iOS di solito consegna già un JPEG.
 - **"File originale".** Nell'app installata su iOS apre il foglio di condivisione, che offre anteprima, "Salva su File" e "Apri in…": aprire URL `blob:` in modalità standalone su iOS è inaffidabile. Nel browser apre una nuova scheda.
-- **Prefill.** Le euristiche cercano etichette (Da/A, From/To, Von/Nach, Partenza/Arrivo…), righe "X → Y", codici IATA, date in vari formati (IT/EN/DE/FR/ES) e orari. Gli orari con etichetta hanno la precedenza: l'imbarco non è la partenza. Riconoscono anche luoghi già usati in altri biglietti. Si compilano solo i campi non ancora toccati, e se non trovano nulla tacciono.
+- **Prefill.** Le euristiche cercano etichette (Da/A, From/To, Von/Nach, Partenza/Arrivo, Abfahrt/Ankunft, ab/an…), righe "X → Y" anche dopo "Hinfahrt:"/"Andata:", codici IATA, date in vari formati (IT/EN/DE/FR/ES) e orari. Gli orari con etichetta hanno la precedenza: l'imbarco non è la partenza. Riconoscono anche luoghi già usati in altri biglietti. Si compilano solo i campi non ancora toccati, e se non trovano nulla tacciono.
 - **Zoom.** Pinch per ingrandire (fino a 6×), trascinamento quando è ingrandito, doppio tap per zoomare sul punto o tornare al fit. A zoom 1 lo swipe orizzontale passa alla tratta precedente o successiva dello stesso viaggio. Ci sono anche le frecce "‹ 2 / 3 ›" in alto.
 - **Eliminazione.** Conferma in linea ("Elimina" → "Elimina davvero"), senza dialoghi di sistema.
 - **Accento.** Rosso segnale sobrio (`#B5391C`, in dark `#E8734F`), usato solo per "Prossimo" e per i countdown (e per la conferma di eliminazione).

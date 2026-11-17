@@ -8,6 +8,8 @@ export interface Guess {
   to?: string;
   departAt?: string;
   arriveAt?: string;
+  seat?: string;
+  note?: string;
 }
 
 const MONTHS: Record<string, number> = {};
@@ -69,8 +71,9 @@ function findTimes(text: string) {
   return out;
 }
 
-const AIRLINE = /\b(boarding|imbarco|gate|flight|volo|flug|vuelo|vol\b|airline|airways|lufthansa|ita airways|alitalia|ryanair|easyjet|aeromexico|aeroméxico|condor|klm|air france|iberia|seat\s*\/?\s*posto|bordkarte|boarding pass|carta d'imbarco)/i;
-const RAIL = /\b(trenitalia|italo|frecciarossa|frecciargento|intercity|regionale|treno|train|zug|bahn|db fernverkehr|deutsche bahn|öbb|oebb|sbb|cff|ffs|sncf|renfe|eurostar|nightjet|carrozza|wagen|coach\s*\d|binario|gleis)/i;
+const AIRLINE = /\b(boarding|imbarco|gate|flight|volo|flug|abflug|flugnummer|vuelo|airline|airways|lufthansa|ita airways|alitalia|ryanair|easyjet|aeromexico|aeroméxico|condor|eurowings|klm|air france|iberia|swiss|austrian|bordkarte|boarding pass|carta d'imbarco)/i;
+const RAIL = /\b(trenitalia|italo|frecciarossa|frecciargento|intercity|regionale|treno|train|zug|bahn|fahrkarte|reservierung|hbf|db fernverkehr|deutsche bahn|öbb|oebb|railjet|sbb|cff|ffs|sncf|renfe|eurostar|nightjet|carrozza|wagen|coach\s*\d|binario|gleis|ICE\s?\d|ECE?\s?\d)/i;
+const EVENT = /\b(concert|concerto|konzert|festival|teatro|theater|theatre|stadio|stadion|stadium|arena|palazzetto|ingresso|eintritt|einlass|admission|ticketone|ticketmaster|eventim|vivaticket|dice\.fm|tour 20\d\d|spettacolo|show|museo|museum|mostra|ausstellung)/i;
 
 // IATA: parole di tre lettere maiuscole da non scambiare per aeroporti.
 const NOT_IATA = new Set('THE AND FOR EUR USD MXN PNR REF VAT IVA TAX NON PER DEL DIE DER DAS UND VON NACH ORE ORA GATE SEQ PAX MRS MRS MR MS ECO BUS FLY YES OUT SEAT ADT CHD INF DOC NUM CAB BAG KG OK'.split(' '));
@@ -85,8 +88,12 @@ function findRoute(text: string, known: string[]): { from?: string; to?: string 
   const to = lab(/(?:^|\n)\s*(?:a|to|nach|arrivo|arrival|ankunft|arrivée|destination|destinazione)\s*[:\-]\s*([^\n\d]{3,40})/i);
   if (from && to && from !== to) return { from: tidy(from), to: tidy(to) };
 
-  // 2. "X → Y" / "X - Y" / "X > Y" su una riga.
-  const arrow = /(?:^|\n)\s*([A-ZÀ-Ý][\p{L} .'’()-]{1,30}?)\s*(?:→|›|»|>|–|—| - | to | nach )\s*([A-ZÀ-Ý][\p{L} .'’()-]{1,30}?)\s*(?:\n|$)/u.exec(text);
+  // 1b. "von X nach Y" / "from X to Y" nella stessa riga.
+  const inline = /\b(?:von|from)\s+([A-ZÀ-Ý][\p{L} .'’()-]{1,30}?)\s+(?:nach|to)\s+([A-ZÀ-Ý][\p{L} .'’()-]{1,30}?)(?=\s{2,}|\s*[\n,;(]|\s+\d|$)/u.exec(text);
+  if (inline) return { from: tidy(inline[1]), to: tidy(inline[2]) };
+
+  // 2. "X → Y" / "X - Y" / "X > Y" su una riga (anche dopo "Hinfahrt:", "Andata:" …).
+  const arrow = /(?:^|\n)\s*(?:(?:[Hh]infahrt|[Rr]ückfahrt|[Aa]ndata|[Rr]itorno|[Oo]utbound|[Rr]eturn|[Ss]trecke|[Tt]ratta|[Rr]oute|[Pp]ercorso)\s*:?\s*)?([A-ZÀ-Ý][\p{L} .'’()-]{1,30}?)\s*(?:→|›|»|>|–|—| - | to | nach )\s*([A-ZÀ-Ý][\p{L} .'’()-]{1,30}?)\s*(?:\n|$)/u.exec(text);
   if (arrow) return { from: tidy(arrow[1]), to: tidy(arrow[2]) };
 
   // 3. Codici IATA (MUC MEX, MUC-MEX, MUC/MEX).
@@ -95,6 +102,11 @@ function findRoute(text: string, known: string[]): { from?: string; to?: string 
   while ((r = iata.exec(text))) {
     if (!NOT_IATA.has(r[1]) && !NOT_IATA.has(r[2]) && r[1] !== r[2]) return { from: r[1], to: r[2] };
   }
+
+  // 3b. "MUNICH MUC  FRANKFURT FRA" (carte d'imbarco).
+  const cityCode = /\b[A-Z][A-Z .-]{2,20}?\s\(?([A-Z]{3})\)?\s+(?:→|-|–|>|TO\s)?\s*[A-Z][A-Z .-]{2,20}?\s\(?([A-Z]{3})\)?(?=\s|$)/.exec(text);
+  if (cityCode && !NOT_IATA.has(cityCode[1]) && !NOT_IATA.has(cityCode[2]) && cityCode[1] !== cityCode[2])
+    return { from: cityCode[1], to: cityCode[2] };
 
   // 4. Luoghi già usati, nell'ordine in cui compaiono nel testo.
   const lower = text.toLowerCase();
@@ -107,7 +119,7 @@ function findRoute(text: string, known: string[]): { from?: string; to?: string 
 }
 
 const tidy = (s: string) =>
-  s.replace(/\s+/g, ' ').replace(/[,:;.]+$/, '').trim().replace(/\b(\p{L})(\p{L}*)/gu, (_, a: string, b: string) =>
+  s.replace(/\s+/g, ' ').replace(/[\s,:;.\-–]+$/, '').trim().replace(/\b(\p{L})(\p{L}*)/gu, (_, a: string, b: string) =>
     s === s.toUpperCase() ? a + b.toLowerCase() : a + b);
 
 export function guessFromText(text: string, known: string[] = []): Guess {
@@ -116,10 +128,21 @@ export function guessFromText(text: string, known: string[] = []): Guess {
     if (!text || text.trim().length < 10) return g;
     if (AIRLINE.test(text)) g.type = 'volo';
     else if (RAIL.test(text)) g.type = 'treno';
+    else if (EVENT.test(text)) g.type = 'evento';
 
-    const route = findRoute(text, known);
-    if (route.from) g.from = route.from;
-    if (route.to) g.to = route.to;
+    if (g.type === 'evento') {
+      // Luogo: la riga che nomina arena/teatro/stadio…, fino alla prima virgola.
+      const venue = /(?:^|\n)\s*([^\n]*?\b(?:arena|teatro|theater|theatre|stadio|stadion|stadium|palazzetto|forum|auditorium|halle|hall|club|museo|museum|piazza|parco|ippodromo|palasport)\b[^\n,]*)/i.exec(text);
+      if (venue) g.to = tidy(venue[1]).slice(0, 50);
+    } else {
+      const route = findRoute(text, known);
+      if (route.from) g.from = route.from;
+      if (route.to) g.to = route.to;
+    }
+    const seat = findSeat(text);
+    if (seat) g.seat = seat;
+    const num = findNumber(text, g.type);
+    if (num) g.note = num;
 
     const dates = findDates(text);
     const times = findTimes(text);
@@ -137,13 +160,19 @@ export function guessFromText(text: string, known: string[] = []): Guess {
         const m = re.exec(text);
         return m ? { idx: m.index, h: +m[1], min: +m[2] } : undefined;
       };
-      const dep = labeled(/(?:partenza|part\.|departure|departs?|dep\.|abfahrt|ab\b|départ|salida)[^\d\n]{0,20}([01]?\d|2[0-3])[:.]([0-5]\d)/i) ?? near[0];
-      const arr = labeled(/(?:arrivo|arr\.|arrival|arrives?|ankunft|an\b|arrivée|llegada)[^\d\n]{0,20}([01]?\d|2[0-3])[:.]([0-5]\d)/i);
+      // (?![\d.]) evita di leggere "08.12.2026" come orario 08:12.
+      const T = String.raw`[^\d\n]{0,20}([01]?\d|2[0-3])[:.]([0-5]\d)(?![\d.])`;
+      const ev = g.type === 'evento';
+      const dep = (ev
+        ? labeled(new RegExp(String.raw`(?:inizio|beginn|start|show|ore)` + T, 'i')) ??
+          labeled(new RegExp(String.raw`(?:apertura porte|doors|einlass)` + T, 'i'))
+        : labeled(new RegExp(String.raw`(?:partenza|part\.|departure|departs?|dep\.|abfahrt|abflug|ab\b|départ|salida)` + T, 'i'))) ?? near[0];
+      const arr = labeled(new RegExp(String.raw`(?:arrivo|arr\.|arrival|arrives?|ankunft|an\b|arrivée|llegada|fine|ende)` + T, 'i'));
       if (dep) {
         g.departAt = `${day}T${pad(dep.h)}:${pad(dep.min)}`;
         const depMin = dep.h * 60 + dep.min;
         // Senza etichetta accettiamo solo un orario successivo nello stesso giorno.
-        const a = arr ?? near.find((t) => t.idx > dep.idx && t.h * 60 + t.min > depMin);
+        const a = arr ?? (ev ? undefined : near.find((t) => t.idx > dep.idx && t.h * 60 + t.min > depMin));
         if (a && a.h * 60 + a.min !== depMin) {
           // Se l'arrivo è "prima" della partenza, è il giorno dopo.
           const next = a.h * 60 + a.min < depMin;
@@ -158,4 +187,37 @@ export function guessFromText(text: string, known: string[] = []): Guess {
     /* mai bloccare */
   }
   return g;
+}
+
+// ——— Posto ———
+// Riconosce carrozza/posto (IT, DE, EN, FR, ES) e settore/fila/posto per gli eventi.
+// Restituisce sempre etichette in italiano: "Carrozza 254 · Posto 46".
+const SEAT_PARTS: [string, RegExp][] = [
+  ['Carrozza', /(?:carrozza|carr\.|wagen|wg\.|coach|voiture|vagón|coche)\s*(?:nr\.?|n\.|no\.?)?\s*[:.]?\s*(\d{1,3}[A-Z]?)\b/i],
+  ['Settore', /(?:settore|sector|sektor|block|blocco|tribuna|tribüne|ingresso|eingang)\s*[:.]?\s*([A-Z0-9]{1,4})\b/i],
+  ['Fila', /(?:fila|row|reihe|rang)\s*[:.]?\s*([A-Z0-9]{1,3})\b/i],
+  ['Posto', /(?:posto|posti|sitzplatz|platz|plätze|pl\.|seat|sitz|siège|place|asiento)\s*(?:nr\.?|n\.|no\.?)?\s*[:.]?\s*(\d{1,3}[A-K]?(?:\s*[,/+-]\s*\d{1,3}[A-K]?)*)\b/i],
+];
+
+export function findSeat(text: string): string | undefined {
+  const parts: string[] = [];
+  for (const [label, re] of SEAT_PARTS) {
+    const m = re.exec(text);
+    if (m) parts.push(`${label} ${m[1].replace(/\s+/g, '')}`);
+  }
+  // Senza "Posto" il resto (es. solo un ingresso) non basta.
+  return parts.some((p) => p.startsWith('Posto')) ? parts.join(' · ') : undefined;
+}
+
+/** Numero di treno o volo, per le note: "ECE 85", "LH 498". */
+function findNumber(text: string, type?: string): string | undefined {
+  if (type === 'treno') {
+    const m = /\b(ICE|IC|ECE|EC|RJX?|NJ|EN|FR|FA|FB|ITA|IR|IRE|RE|RB|TGV|TER|AVE|EST)\s?(\d{1,5})\b/.exec(text);
+    if (m) return `${m[1]} ${m[2]}`;
+  }
+  if (type === 'volo') {
+    const m = /(?:flight|flug(?:nummer)?|volo|vuelo|vol)\s*(?:no\.?|nr\.?|n\.)?\s*[:.]?\s*([A-Z0-9]{2})\s?(\d{1,4})\b/i.exec(text);
+    if (m) return `${m[1].toUpperCase()} ${m[2]}`;
+  }
+  return undefined;
 }

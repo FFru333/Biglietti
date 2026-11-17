@@ -1,6 +1,7 @@
 // Dati demo: biglietti finti con un codice fittizio disegnato su canvas. Rimovibili in un tap.
 import { allTickets, deleteTickets, putTickets, uid } from './db';
 import { toLocalInput } from './dates';
+import { makeThumb } from './files';
 import type { Ticket, TicketType } from './types';
 
 function at(daysFromNow: number, hh: number, mm: number) {
@@ -47,22 +48,24 @@ async function fakeTicket(title: string, sub: string, seed: number): Promise<Blo
 }
 
 export async function loadDemo() {
-  const rows: [TicketType, string, string, string, string | undefined, string | undefined, string?][] = [
-    ['treno', 'München Hbf', 'Bologna C.le', at(-10, 7, 28), at(-10, 14, 10), undefined, 'ECE 85 · Carrozza 254 · Posto 46'],
-    ['treno', 'Bologna C.le', 'Cesena', at(2, 9, 47), at(2, 10, 33), 'Natale'],
-    ['treno', 'Cesena', 'Bologna C.le', at(6, 18, 12), at(6, 19, 2), 'Natale'],
-    ['volo', 'MUC', 'FRA', at(21, 7, 5), at(21, 8, 0), 'Messico', 'LH 95 · Scalo a Francoforte'],
-    ['volo', 'FRA', 'MEX', at(21, 10, 15), at(21, 15, 20), 'Messico', 'LH 498 · Posto 42K'],
-    ['volo', 'MEX', 'MUC', at(35, 20, 30), at(36, 15, 5), 'Messico', 'LH 499'],
+  // tipo, da, a, partenza, arrivo, viaggio, posto, note
+  const rows: [TicketType, string, string, string, string | undefined, string | undefined, string | undefined, string?][] = [
+    ['treno', 'München Hbf', 'Bologna C.le', at(-10, 7, 28), at(-10, 14, 10), undefined, 'Carrozza 254 · Posto 46', 'ECE 85'],
+    ['treno', 'Bologna C.le', 'Cesena', at(2, 9, 47), at(2, 10, 33), 'Natale', 'Carrozza 3 · Posto 12A', 'Regionale 17521'],
+    ['treno', 'Cesena', 'Bologna C.le', at(6, 18, 12), at(6, 19, 2), 'Natale', undefined],
+    ['evento', 'Concerto di Capodanno', 'Teatro Comunale, Bologna', at(14, 21, 0), undefined, 'Natale', 'Platea · Fila 12 · Posto 7'],
+    ['volo', 'MUC', 'FRA', at(21, 7, 5), at(21, 8, 0), 'Messico', 'Posto 12C', 'LH 95 · Scalo a Francoforte'],
+    ['volo', 'FRA', 'MEX', at(21, 10, 15), at(21, 15, 20), 'Messico', 'Posto 42K', 'LH 498'],
+    ['volo', 'MEX', 'MUC', at(35, 20, 30), at(36, 15, 5), 'Messico', 'Posto 38A', 'LH 499'],
   ];
   const now = Date.now();
   const tickets: Ticket[] = [];
   for (let i = 0; i < rows.length; i++) {
-    const [type, from, to, departAt, arriveAt, trip, note] = rows[i];
-    const blob = await fakeTicket(`${from} → ${to}`, departAt.replace('T', '  '), i + 7);
+    const [type, from, to, departAt, arriveAt, trip, seat, note] = rows[i];
+    const blob = await fakeTicket(type === 'evento' ? from : `${from} → ${to}`, departAt.replace('T', '  '), i + 7);
     tickets.push({
-      id: uid(), type, from, to, departAt, arriveAt, trip, note,
-      file: { name: `demo-${i + 1}.png`, mime: 'image/png', blob },
+      id: uid(), type, from, to, departAt, arriveAt, trip, seat, note,
+      file: { name: `demo-${i + 1}.png`, mime: 'image/png', blob, thumb: await makeThumb(blob) },
       createdAt: now + i, demo: true,
     });
   }

@@ -78,7 +78,7 @@ export function Settings() {
 
       <section class="group">
         <h2 class="section-title">Dati demo</h2>
-        <p class="hint">Sei biglietti finti per provare il layout. Non finiscono nel backup.</p>
+        <p class="hint">Sette biglietti finti per provare il layout. Non finiscono nel backup.</p>
         <div class="buttons">
           {demo === 0 ? (
             <button class="btn" disabled={busy} onClick={() => run(async () => { await loadDemo(); return 'Dati demo caricati.'; })}>Carica demo</button>

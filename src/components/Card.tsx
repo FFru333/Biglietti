@@ -1,7 +1,7 @@
 import { Arrow, TypeIcon } from '../icons';
 import { countdown, formatShort, formatTime } from '../dates';
 import { href } from '../router';
-import { TYPE_LABEL, type Ticket } from '../types';
+import { TYPE_LABEL, isEvent, type Ticket } from '../types';
 
 /** Giorni di differenza tra arrivo e partenza (0 se stesso giorno). */
 export function plusDays(t: Ticket) {
@@ -11,6 +11,7 @@ export function plusDays(t: Ticket) {
 }
 
 export function Route({ t }: { t: Ticket }) {
+  if (isEvent(t)) return <span class="route">{t.from}</span>;
   return (
     <span class="route">
       <span>{t.from}</span>
@@ -27,6 +28,13 @@ export function When({ t }: { t: Ticket }) {
       {t.arriveAt && <> – {formatTime(t.arriveAt)}{plusDays(t) > 0 && <sup class="plus-day">+{plusDays(t)}</sup>}</>}
     </span>
   );
+}
+
+/** Riga secondaria: luogo (eventi) e posto. */
+export function Extra({ t }: { t: Ticket }) {
+  const bits = [isEvent(t) ? t.to : '', t.seat].filter(Boolean);
+  if (!bits.length) return null;
+  return <span class="extra num">{bits.join(' · ')}</span>;
 }
 
 export function Tag({ t, showTrip = true }: { t: Ticket; showTrip?: boolean }) {
@@ -48,6 +56,7 @@ export function Card({ t, past, showTrip }: { t: Ticket; past?: boolean; showTri
       </div>
       <h3 class="card-route"><Route t={t} /></h3>
       <When t={t} />
+      <Extra t={t} />
     </a>
   );
 }
@@ -64,6 +73,7 @@ export function NextCard({ t, showTrip }: { t: Ticket; showTrip?: boolean }) {
         <When t={t} />
         <Tag t={t} showTrip={showTrip} />
       </div>
+      <Extra t={t} />
     </a>
   );
 }

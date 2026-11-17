@@ -31,7 +31,10 @@ export async function exportBackup(): Promise<File> {
         name: t.file.name,
         mime: t.file.mime,
         data: await blobToDataURL(t.file.blob),
-        render: t.file.render ? await blobToDataURL(t.file.render) : undefined,
+        // render coincide con renders[0]: non lo duplichiamo nel file.
+        render: t.file.render && !t.file.renders ? await blobToDataURL(t.file.render) : undefined,
+        renders: t.file.renders ? await Promise.all(t.file.renders.map(blobToDataURL)) : undefined,
+        thumb: t.file.thumb ? await blobToDataURL(t.file.thumb) : undefined,
       },
     });
   }
@@ -78,9 +81,12 @@ export async function importBackup(file: Blob): Promise<number> {
         mime: t.file.mime,
         blob: await dataURLToBlob(t.file.data),
         render: t.file.render ? await dataURLToBlob(t.file.render) : undefined,
+        renders: Array.isArray(t.file.renders) ? await Promise.all(t.file.renders.map(dataURLToBlob)) : undefined,
+        thumb: t.file.thumb ? await dataURLToBlob(t.file.thumb) : undefined,
       },
     });
   }
+  tickets.forEach((t) => { if (!t.file.render && t.file.renders?.length) t.file.render = t.file.renders[0]; });
   await putTickets(tickets);
   return tickets.length;
 }

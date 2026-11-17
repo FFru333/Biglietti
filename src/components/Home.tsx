@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useTickets, setPendingFile, distinct } from '../store';
 import { go, href } from '../router';
 import { split } from '../sort';
-import { PlusIcon } from '../icons';
+import { GridIcon, ListIcon, PlusIcon } from '../icons';
+import { Grid } from './Grid';
+import { upgradeAll } from '../upgrade';
+import { reload } from '../store';
 import { Card, NextCard } from './Card';
 import { TYPES, TYPE_SECTION, type Ticket } from '../types';
 
@@ -13,6 +16,17 @@ export function Home() {
   const [trip, setTrip] = useState<string | null>(() => sessionStorage.getItem('trip'));
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const input = useRef<HTMLInputElement>(null);
+  const [mode, setMode] = useState<'list' | 'grid'>(() => {
+    try { return localStorage.getItem('view') === 'grid' ? 'grid' : 'list'; } catch { return 'list'; }
+  });
+  const pickMode = (m: 'list' | 'grid') => {
+    setMode(m);
+    try { localStorage.setItem('view', m); } catch { /* */ }
+  };
+  // Completa in background pagine e miniature mancanti (biglietti salvati con versioni precedenti).
+  useEffect(() => {
+    if (all?.length) upgradeAll(all).then((changed) => { if (changed) reload(); });
+  }, [all]);
   // Aggiorna i countdown ogni minuto.
   const [, tick] = useState(0);
   useEffect(() => {
@@ -43,9 +57,17 @@ export function Home() {
     <main class="page home">
       <header class="bar">
         <h1 class="wordmark">Biglietti</h1>
-        <button class="icon-btn" aria-label="Aggiungi biglietto" onClick={() => input.current?.click()}>
-          <PlusIcon />
-        </button>
+        <div class="bar-actions">
+          {all && all.length > 0 && (
+            <button class="icon-btn" aria-label={mode === 'grid' ? 'Mostra elenco' : 'Mostra anteprime'}
+              onClick={() => pickMode(mode === 'grid' ? 'list' : 'grid')}>
+              {mode === 'grid' ? <ListIcon /> : <GridIcon />}
+            </button>
+          )}
+          <button class="icon-btn" aria-label="Aggiungi biglietto" onClick={() => input.current?.click()}>
+            <PlusIcon />
+          </button>
+        </div>
         <input ref={input} type="file" accept={ACCEPT} hidden onChange={onFile} />
       </header>
 
@@ -62,9 +84,11 @@ export function Home() {
         <p class="empty">Nessun biglietto. Tocca + per aggiungere un PDF o una foto.</p>
       )}
 
-      {next && <NextCard t={next} showTrip={!activeTrip} />}
+      {mode === 'grid' && <Grid future={future} past={past} showTrip={!activeTrip} />}
 
-      {TYPES.map((type) => {
+      {mode === 'list' && next && <NextCard t={next} showTrip={!activeTrip} />}
+
+      {mode === 'list' && TYPES.map((type) => {
         const fut = future.filter((t) => t.type === type && t !== next);
         const pst = past.filter((t) => t.type === type);
         if (!fut.length && !pst.length) return null;

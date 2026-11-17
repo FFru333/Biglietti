@@ -32,8 +32,19 @@ export const TicketIcon = ({ size = 16, class: c }: P) =>
     </>
   ));
 
+export const DocIcon = ({ size = 16, class: c }: P) =>
+  svg(size, c, (
+    <>
+      <path d="M6 3.5h8l4 4v13H6Z" />
+      <path d="M14 3.5v4h4M9 12h6M9 15.5h6" />
+    </>
+  ));
+
 export const TypeIcon = ({ type, size, class: c }: P & { type: TicketType }) =>
-  type === 'volo' ? <PlaneIcon size={size} class={c} /> : type === 'treno' ? <TrainIcon size={size} class={c} /> : <TicketIcon size={size} class={c} />;
+  type === 'volo' ? <PlaneIcon size={size} class={c} />
+  : type === 'treno' ? <TrainIcon size={size} class={c} />
+  : type === 'evento' ? <TicketIcon size={size} class={c} />
+  : <DocIcon size={size} class={c} />;
 
 export const PlusIcon = ({ size = 22 }: P) => svg(size, undefined, <path d="M12 4.5v15M4.5 12h15" />);
 export const BackIcon = ({ size = 22 }: P) => svg(size, undefined, <path d="M14.5 5.5 8 12l6.5 6.5" />);
@@ -49,3 +60,14 @@ export const Arrow = () => (
 
 export const SwapIcon = ({ size = 18 }: P) =>
   svg(size, undefined, <path d="M8 4v16M8 4 4.5 7.5M8 4l3.5 3.5M16 20V4M16 20l-3.5-3.5M16 20l3.5-3.5" />);
+
+export const ListIcon = ({ size = 20 }: P) => svg(size, undefined, <path d="M4 6.5h16M4 12h16M4 17.5h16" />);
+export const GridIcon = ({ size = 20 }: P) =>
+  svg(size, undefined, (
+    <>
+      <rect x="4" y="4" width="6.5" height="6.5" rx="1" />
+      <rect x="13.5" y="4" width="6.5" height="6.5" rx="1" />
+      <rect x="4" y="13.5" width="6.5" height="6.5" rx="1" />
+      <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1" />
+    </>
+  ));
