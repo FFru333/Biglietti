@@ -68,6 +68,26 @@ export function TicketForm({ id }: { id?: string }) {
     return () => void (alive = false);
   }, [file]);
 
+  // Modifica: rilegge il file già salvato e sovrascrive i campi riconosciuti.
+  const reread = async () => {
+    if (!existing || reading) return;
+    setReading(true);
+    try {
+      const src = new File([existing.file.blob], existing.file.name, { type: existing.file.mime });
+      const p = await processFile(src);
+      const g = guessFromText(p.text, places, p.rows);
+      const keys = (Object.keys(g) as (keyof typeof g)[]).filter((k) => g[k]);
+      setF((cur) => {
+        const n = { ...cur };
+        keys.forEach((k) => ((n as Record<string, string>)[k] = g[k] as string));
+        return n;
+      });
+      setPrefilled(keys.some((k) => k !== 'type' && k !== 'note'));
+    } finally {
+      setReading(false);
+    }
+  };
+
   const set = <K extends keyof Fields>(k: K, v: Fields[K]) => {
     touched.current.add(k);
     setF((cur) => ({ ...cur, [k]: v }));
@@ -143,6 +163,9 @@ export function TicketForm({ id }: { id?: string }) {
           </span>
           {id && (
             <>
+              {!file && isPdf({ type: existing?.file.mime ?? '', name: existing?.file.name ?? '' }) && (
+                <button type="button" class="text-btn small" onClick={reread} disabled={reading}>Rileggi dal file</button>
+              )}
               <button type="button" class="text-btn small" onClick={() => replaceInput.current?.click()}>Sostituisci</button>
               <input ref={replaceInput} type="file" accept={ACCEPT} hidden
                 onChange={(e) => { const x = (e.target as HTMLInputElement).files?.[0]; if (x) setFile(x); }} />

@@ -1,5 +1,5 @@
 import type { Row } from './layout';
-import { findAirports, findGenericStations, findStations } from './places';
+import { findAirports, findGenericStations, findStations, stationByAlias } from './places';
 // Prefill "best effort" dal testo del PDF. Euristiche semplici, nessuna rete.
 // Ogni funzione è tollerante: se qualcosa non torna restituisce meno campi, mai un errore.
 import type { TicketType } from './types';
@@ -67,10 +67,16 @@ function inferYear(m: number, d: number) {
 
 function findTimes(text: string) {
   const out: { idx: number; h: number; min: number }[] = [];
-  const re = /(?<![\d.:/])([01]?\d|2[0-3])[:.h]([0-5]\d)(?![\d.:/])/g;
-  let r: RegExpExecArray | null;
-  while ((r = re.exec(text))) out.push({ idx: r.index, h: +r[1], min: +r[2] });
-  return out;
+  // Prima gli orari con i due punti (14:32). Quelli col punto (14.32) sono ambigui con le date
+  // senza anno ("20.11"), quindi solo se non ce ne sono altri, o se seguiti da "Uhr"/"h".
+  const scan = (re: RegExp) => {
+    let r: RegExpExecArray | null;
+    while ((r = re.exec(text))) out.push({ idx: r.index, h: +r[1], min: +r[2] });
+  };
+  scan(/(?<![\d.:/])([01]?\d|2[0-3]):([0-5]\d)(?![\d.:/])/g);
+  if (!out.length) scan(/(?<![\d.:/])([01]?\d|2[0-3])[.h]([0-5]\d)(?![\d.:/])/g);
+  else scan(/(?<![\d.:/])([01]?\d|2[0-3])\.([0-5]\d)(?=\s*(?:uhr|h)\b)/gi);
+  return out.sort((a, b) => a.idx - b.idx);
 }
 
 const AIRLINE = /\b(boarding|imbarco|gate|flight|volo|flug|abflug|flugnummer|vuelo|airline|airways|lufthansa|ita airways|alitalia|ryanair|easyjet|aeromexico|aeroméxico|condor|eurowings|klm|air france|iberia|swiss|austrian|bordkarte|boarding pass|carta d'imbarco)/i;
@@ -104,6 +110,17 @@ function placey(v: string): boolean {
 
 interface Pick { from?: string; to?: string }
 
+/** Il segmento della riga più allineato (per inizio colonna) a quello dato, se si sovrappone. */
+function nearestBelow(row: Row, seg: { x: number; x2: number }) {
+  let best: Row[number] | undefined, bestD = Infinity;
+  for (const b of row) {
+    if (b.x > seg.x2 + 20 || b.x2 < seg.x - 20) continue;
+    const d = Math.abs(b.x - seg.x);
+    if (d < bestD) { best = b; bestD = d; }
+  }
+  return best;
+}
+
 /** Tabelle e etichette: valore a destra dell'etichetta, o sotto nella stessa colonna. */
 function fromRows(rows: Row[]): Pick {
   const out: Pick = {};
@@ -120,7 +137,7 @@ function fromRows(rows: Row[]): Pick {
     }
     // Sotto, nella stessa colonna (fino a 4 righe).
     for (let j = ri + 1; j < Math.min(rows.length, ri + 5); j++) {
-      const below = rows[j].find((b) => b.x < seg.x2 + 20 && b.x2 > seg.x - 20);
+      const below = nearestBelow(rows[j], seg);
       if (!below) continue;
       const v = stripTail(below.text);
       if (placey(v)) return v;
@@ -159,7 +176,7 @@ function lookup(rows: Row[], label: RegExp, accept: (v: string) => string | unde
       const rest = seg.text.replace(label, '').replace(/^\s*[:.]?\s*/, '');
       const cands = [rest, rows[i][si + 1]?.text ?? ''];
       for (let j = i + 1; j < Math.min(rows.length, i + 4); j++) {
-        const below = rows[j].find((b) => b.x < seg.x2 + 12 && b.x2 > seg.x - 12);
+        const below = nearestBelow(rows[j], seg);
         if (below) { cands.push(below.text); break; }
       }
       for (const c of cands) {
@@ -195,11 +212,21 @@ function seatFromRows(rows: Row[]): string | undefined {
   return parts.filter(([, v]) => v).map(([l, v]) => `${l} ${v}`).join(' · ');
 }
 
+/** Se il valore è esattamente il nome di una stazione nota ("MUENCHEN", "BOLOGNA"), usa il nome completo. */
+function canon(v: string): string {
+  return stationByAlias(v) ?? tidy(v);
+}
+
 function findRoute(text: string, known: string[], rows: Row[] = [], type?: string): Pick {
   // 1. Etichette e tabelle (con le posizioni ricostruite dal PDF).
   if (rows.length) {
-    const r = fromRows(rows);
-    if (r.from && r.to) return { from: tidy(r.from), to: tidy(r.to) };
+    // Frecce attaccate alle intestazioni o ai valori ("-> NACH", "-> BOLOGNA").
+    const clean = rows
+      .map((r) => r.map((sg) => ({ ...sg, text: sg.text.replace(/^(?:-+>|=>|→|›|»)\s*/, '') })).filter((sg) => sg.text))
+      .filter((r) => r.length);
+    const r = fromRows(clean);
+    const c = (v: string) => (type === 'volo' ? tidy(v) : canon(v));
+    if (r.from && r.to) return { from: c(r.from), to: c(r.to) };
   }
 
   // 1b. Etichette nel testo semplice ("Da: X" / "A: Y").
@@ -272,7 +299,7 @@ export function guessFromText(text: string, known: string[] = [], rows: Row[] = 
       if (route.from) g.from = route.from;
       if (route.to) g.to = route.to;
     }
-    const seat = findSeat(text) ?? (rows.length ? seatFromRows(rows) : undefined);
+    const seat = findSeat(text) ?? (rows.length ? seatFromRows(rows) : undefined) ?? findSeat(text, true);
     if (seat) g.seat = seat;
     const num = findNumber(text, g.type);
     if (num) g.note = num;
@@ -328,16 +355,20 @@ export function guessFromText(text: string, known: string[] = [], rows: Row[] = 
 // Riconosce carrozza/posto (IT, DE, EN, FR, ES) e settore/fila/posto per gli eventi.
 // Restituisce sempre etichette in italiano: "Carrozza 254 · Posto 46".
 const SEAT_PARTS: [string, RegExp][] = [
-  ['Carrozza', /(?:carrozza|carr\.|wagen|wg\.|coach|voiture|vagón|coche)\s*(?:nr\.?|n\.|no\.?)?\s*[:.]?\s*(\d{1,3}[A-Z]?)\b/i],
+  ['Carrozza', /(?<![A-Za-zÀ-ÿ])(?:carrozza|carr\.|wagen|wg\.|coach|voiture|vagón|coche)\s*(?:nr\.?|n\.|no\.?)?\s*[:.]?\s*(\d{1,3}[A-Z]?)\b/i],
   ['Settore', /(?:settore|sector|sektor|block|blocco|tribuna|tribüne|ingresso|eingang)\s*[:.]?\s*([A-Z0-9]{1,4})\b/i],
   ['Fila', /(?:fila|row|reihe|rang)\s*[:.]?\s*([A-Z0-9]{1,3})\b/i],
-  ['Posto', /(?:posto|posti|sitzplatz|platz|plätze|pl\.|seat|sitz|siège|place|asiento)\s*(?:nr\.?|n\.|no\.?)?\s*[:.]?\s*(\d{1,3}[A-K]?(?:\s*[,/+-]\s*\d{1,3}[A-K]?)*)\b/i],
+  ['Posto', /(?<![A-Za-zÀ-ÿ])(?:posto|posti|sitzplatz|platz|plätze|pl\.|seat|sitz|siège|place|asiento)\s*(?:nr\.?|n\.|no\.?)?\s*[:.]?\s*(\d{1,3}[A-K]?(?:\s*[,/+-]\s*\d{1,3}[A-K]?)*)\b/i],
 ];
 
-export function findSeat(text: string): string | undefined {
+// Riserva per il posto: il numero può stare una o due parole dopo ("Sitzplatz / FENSTER / 101").
+const SEAT_LOOSE = /(?<![A-Za-zÀ-ÿ])(?:posto|sitzplatz|platz|seat|sitz)(?![A-Za-zÀ-ÿ])[\s.:]*(?:[A-Za-zÀ-ÿ]+[\s.:]+){0,2}?(\d{1,3}[A-K]?)\b(?![,.]\d)/i;
+
+export function findSeat(text: string, loose = false): string | undefined {
   const parts: string[] = [];
   for (const [label, re] of SEAT_PARTS) {
-    const m = re.exec(text);
+    let m = re.exec(text);
+    if (!m && loose && label === 'Posto') m = SEAT_LOOSE.exec(text);
     if (m) parts.push(`${label} ${m[1].replace(/\s+/g, '')}`);
   }
   // Senza "Posto" il resto (es. solo un ingresso) non basta.

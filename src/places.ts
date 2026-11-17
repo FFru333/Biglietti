@@ -84,7 +84,7 @@ Savona|savona
 Sanremo|sanremo
 Ventimiglia|ventimiglia
 Domodossola|domodossola
-München Hbf|munchen hbf|muenchen hbf|munchen hauptbahnhof|monaco centrale|monaco di baviera centrale|munich central|munchen
+München Hbf|munchen hbf|muenchen hbf|muenchen|munchen hauptbahnhof|monaco centrale|monaco di baviera centrale|munich central|munchen
 München Ost|munchen ost|muenchen ost
 München-Pasing|munchen pasing|muenchen pasing
 Augsburg Hbf|augsburg hbf|augsburg
@@ -116,7 +116,7 @@ Garmisch-Partenkirchen|garmisch partenkirchen
 Lindau-Reutin|lindau reutin|lindau
 Innsbruck Hbf|innsbruck hbf|innsbruck
 Salzburg Hbf|salzburg hbf|salisburgo
-Wien Hbf|wien hbf|vienna centrale|wien hauptbahnhof|vienna
+Wien Hbf|wien hbf|wien|vienna centrale|wien hauptbahnhof|vienna
 Linz Hbf|linz hbf
 Graz Hbf|graz hbf
 Villach Hbf|villach hbf
@@ -226,4 +226,10 @@ export function findGenericStations(text: string): Hit[] {
     if (!hits.some((h) => h.name === name)) hits.push({ name, idx: m.index });
   }
   return hits;
+}
+
+/** Nome completo se il testo è esattamente un alias noto (es. "MUENCHEN" → "München Hbf"). */
+export function stationByAlias(v: string): string | undefined {
+  const n = norm(v);
+  return stationList().find((st) => st.aliases.includes(n))?.name;
 }
