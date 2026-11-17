@@ -88,7 +88,12 @@ export async function saveBackup(file: File) {
 }
 
 export async function importBackup(file: Blob): Promise<number> {
-  const data = JSON.parse(await file.text());
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch {
+    throw new Error('Questo file non è un backup di Biglietti.');
+  }
   if (data?.format !== FORMAT || !Array.isArray(data.tickets)) throw new Error('File di backup non riconosciuto.');
   const tickets: Ticket[] = [];
   for (const t of data.tickets) {

@@ -67,7 +67,7 @@ export function Settings() {
             Esporta
           </button>
           <button class="btn" disabled={busy} onClick={() => importInput.current?.click()}>Importa</button>
-          <input ref={importInput} type="file" accept="application/json,.json" hidden
+          <input ref={importInput} type="file" hidden
             onChange={(e) => {
               const f = (e.target as HTMLInputElement).files?.[0];
               (e.target as HTMLInputElement).value = '';
