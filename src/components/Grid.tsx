@@ -1,40 +1,34 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useState } from 'preact/hooks';
 import { countdown, formatTime, parseLocal } from '../dates';
 import { href } from '../router';
 import { TypeIcon } from '../icons';
-import { pagesOf, type Ticket } from '../types';
+import type { Ticket } from '../types';
 import { Extra, Route } from './Card';
 
-const MESI = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
-const GIORNI = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
-
-function useObjectUrl(b?: Blob) {
-  const url = useMemo(() => (b ? URL.createObjectURL(b) : ''), [b]);
-  useEffect(() => () => void (url && URL.revokeObjectURL(url)), [url]);
-  return url;
-}
-
 function Tile({ t, past, showTrip }: { t: Ticket; past?: boolean; showTrip?: boolean }) {
-  const src = useObjectUrl(t.file.thumb ?? pagesOf(t)[0]);
   const d = parseLocal(t.departAt);
-  const year = d.getFullYear() !== new Date().getFullYear() ? ` ${d.getFullYear()}` : '';
+  const date = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+  const day = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'][d.getDay()];
   return (
-    <a class={`tile${past ? ' is-past' : ''}`} href={href.view(t.id)}>
-      <div class="tile-thumb">
-        {src ? <img src={src} alt="" loading="lazy" decoding="async" /> : <TypeIcon type={t.type} size={28} />}
+    <a class={`ticket${past ? ' is-past' : ''}`} href={href.view(t.id)} aria-label={`${date}, apri il biglietto`}>
+      <div class="ticket-stub">
+        <span class="ticket-date num">{date}</span>
       </div>
-      <div class="tile-date num">
-        <span class="tile-day">{d.getDate()}</span>
-        <span class="tile-month">
-          <span>{MESI[d.getMonth()]}{year}</span>
-          <span>{GIORNI[d.getDay()]} · {formatTime(t.departAt)}</span>
-        </span>
-      </div>
-      <div class="tile-route"><Route t={t} /></div>
-      <Extra t={t} />
-      <div class="tile-foot">
-        <span class="tag"><TypeIcon type={t.type} size={13} />{showTrip && t.trip && <span>{t.trip}</span>}</span>
-        {!past && <span class="countdown num">{countdown(t.departAt)}</span>}
+      <div class="ticket-perf" aria-hidden="true" />
+      <div class="ticket-body">
+        <div class="ticket-route"><Route t={t} /></div>
+        <div class="ticket-time num">
+          {day} · <b>{formatTime(t.departAt)}</b>
+          {t.arriveAt && <> – <b>{formatTime(t.arriveAt)}</b></>}
+        </div>
+        <Extra t={t} />
+        <div class="ticket-foot">
+          <span class="tag">
+            <TypeIcon type={t.type} size={13} />
+            {showTrip && t.trip && <span>{t.trip}</span>}
+          </span>
+          {!past && <span class="ticket-count num">{countdown(t.departAt)}</span>}
+        </div>
       </div>
     </a>
   );
