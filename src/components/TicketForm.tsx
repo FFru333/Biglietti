@@ -52,7 +52,7 @@ export function TicketForm({ id }: { id?: string }) {
         if (!alive) return;
         setProcessed({ renders: p.renders, thumb: p.thumb });
         if (id) return; // in modifica non sovrascriviamo i dati
-        const g = guessFromText(p.text, places);
+        const g = guessFromText(p.text, places, p.rows);
         const keys = (Object.keys(g) as (keyof typeof g)[]).filter((k) => g[k] && !touched.current.has(k));
         if (keys.length) {
           setF((cur) => {
@@ -74,7 +74,8 @@ export function TicketForm({ id }: { id?: string }) {
   };
 
   const ev = f.type === 'evento';
-  const valid = f.from.trim() && (ev || f.to.trim()) && f.departAt && (file || existing) && !reading;
+  // Basta la data: se la tratta non è stata letta, il biglietto si salva lo stesso (titolo = nome del file).
+  const valid = f.departAt && (file || existing) && !reading;
 
   const save = async (e: Event) => {
     e.preventDefault();
@@ -162,13 +163,13 @@ export function TicketForm({ id }: { id?: string }) {
             <label class="field">
               <span class="label">{ev ? 'Evento' : 'Da'}</span>
               <input value={f.from} onInput={(e) => set('from', e.currentTarget.value)} list="places"
-                autocomplete="off" autocapitalize="words" placeholder={ev ? 'Concerto, mostra, partita…' : 'München Hbf'} required />
+                autocomplete="off" autocapitalize="words" placeholder={ev ? 'Concerto, mostra, partita…' : 'München Hbf'} />
             </label>
             {!ev && <button type="button" class="swap" aria-label="Inverti partenza e arrivo" onClick={swap}><SwapIcon /></button>}
             <label class="field">
               <span class="label">{ev ? <>Luogo <i>facoltativo</i></> : 'A'}</span>
               <input value={f.to} onInput={(e) => set('to', e.currentTarget.value)} list="places"
-                autocomplete="off" autocapitalize="words" placeholder={ev ? 'Unipol Arena' : 'Bologna C.le'} required={!ev} />
+                autocomplete="off" autocapitalize="words" placeholder={ev ? 'Unipol Arena' : 'Bologna C.le'} />
             </label>
           </div>
           <datalist id="places">{places.map((p) => <option key={p} value={p} />)}</datalist>

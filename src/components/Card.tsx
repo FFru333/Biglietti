@@ -10,8 +10,12 @@ export function plusDays(t: Ticket) {
   return Math.round((d(t.arriveAt) - d(t.departAt)) / 86400000);
 }
 
+/** Titolo di riserva quando la tratta non è stata indicata: il nome del file, senza estensione. */
+export const fileTitle = (t: Ticket) => t.file.name.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ');
+
 export function Route({ t }: { t: Ticket }) {
-  if (isEvent(t)) return <span class="route">{t.from}</span>;
+  if (isEvent(t)) return <span class="route">{t.from || fileTitle(t)}</span>;
+  if (!t.from || !t.to) return <span class="route">{t.from || t.to || fileTitle(t)}</span>;
   return (
     <span class="route">
       <span>{t.from}</span>

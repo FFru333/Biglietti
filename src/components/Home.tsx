@@ -17,7 +17,8 @@ export function Home() {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const input = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<'list' | 'grid'>(() => {
-    try { return localStorage.getItem('view') === 'grid' ? 'grid' : 'list'; } catch { return 'list'; }
+    // "Anteprime" è la vista iniziale; l'elenco resta a un tocco.
+    try { return localStorage.getItem('view') === 'list' ? 'list' : 'grid'; } catch { return 'grid'; }
   });
   const pickMode = (m: 'list' | 'grid') => {
     setMode(m);

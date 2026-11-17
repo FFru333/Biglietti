@@ -1,3 +1,5 @@
+import type { Row } from './layout';
+import { findAirports, findGenericStations, findStations } from './places';
 // Prefill "best effort" dal testo del PDF. Euristiche semplici, nessuna rete.
 // Ogni funzione è tollerante: se qualcosa non torna restituisce meno campi, mai un errore.
 import type { TicketType } from './types';
@@ -46,7 +48,7 @@ function findDates(text: string): Hit[] {
   while ((r = re1.exec(text))) push(r.index, +r[3], +r[2], +r[1]);
   const re2 = /\b(\d{4})-(\d{2})-(\d{2})\b/g; // 2026-12-08
   while ((r = re2.exec(text))) push(r.index, +r[1], +r[2], +r[3]);
-  const re3 = new RegExp(`\\b(\\d{1,2})\\.?\\s*(${MONTH_RE})\\.?,?\\s*(\\d{4}|\\d{2})?\\b`, 'gi'); // 8 dicembre 2026, 08DEC26
+  const re3 = new RegExp(`\\b(\\d{1,2})\\.?\\s*(${MONTH_RE})\\.?,?(?:\\s*(\\d{4}|\\d{2})(?![:.\\d]))?\\b`, 'gi'); // 8 dicembre 2026, 08DEC26
   while ((r = re3.exec(text))) {
     const y = r[3] ? +r[3] : inferYear(+MONTHS[r[2].toLowerCase()], +r[1]);
     push(r.index, y, MONTHS[r[2].toLowerCase()], +r[1]);
@@ -78,51 +80,182 @@ const EVENT = /\b(concert|concerto|konzert|festival|teatro|theater|theatre|stadi
 // IATA: parole di tre lettere maiuscole da non scambiare per aeroporti.
 const NOT_IATA = new Set('THE AND FOR EUR USD MXN PNR REF VAT IVA TAX NON PER DEL DIE DER DAS UND VON NACH ORE ORA GATE SEQ PAX MRS MRS MR MS ECO BUS FLY YES OUT SEAT ADT CHD INF DOC NUM CAB BAG KG OK'.split(' '));
 
-function findRoute(text: string, known: string[]): { from?: string; to?: string } {
-  // 1. Etichette esplicite su righe separate.
+// ——— Partenza e arrivo ———
+
+const DEP_LABEL = /^(?:stazione di partenza|partenza|partenze|da|from|von|abfahrt|ab|departure|departs?|depart|départ|origine|origin|salida|abflug|abfahrtsort|start(?:bahnhof)?)\s*[:.]?(?=\s|$)/i;
+const ARR_LABEL = /^(?:stazione di arrivo|arrivo|arrivi|a|to|nach|ankunft|an|arrival|arrives?|arrivée|destinazione|destination|llegada|ankunftsort|ziel(?:bahnhof)?)\s*[:.]?(?=\s|$)/i;
+// Parole che stanno nelle tabelle ma non sono luoghi.
+const NOT_PLACE = /^(?:data|datum|date|ora|orario|zeit|time|uhrzeit|gleis|binario|platform|bin\.?|treno|train|zug|produkte?|carrozza|wagen|coach|posto|platz|seat|classe|klasse|class|prezzo|preis|price|totale|gesamt|total|passeggero|reisender|passenger|nome|name|halt|fermata|stop|durata|dauer|duration|cambi|umstieg|changes|tariffa|tarif|fare|codice|code|pnr|ticket|biglietto|fahrkarte|via|über|ueber|hinfahrt|rückfahrt|andata|ritorno|volo|flight|flug|gate|terminal|boarding|imbarco|sitz|reihe|fila|row)$/i;
+
+const stripTail = (v: string) =>
+  v.replace(/\s+(?:ab|an|dep|arr)\.?\s*$/i, '')
+    // via orari, date, binari e numeri in coda: "Bologna C.le 14:32 Bin. 5" → "Bologna C.le"
+    .replace(/\s+(?:\d{1,2}[:.]\d{2}\b.*|\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b.*|(?:bin|gleis|binario|platform)\b.*)$/i, '')
+    .replace(/[\s,:;.\-–(]+$/, '')
+    .trim();
+
+function placey(v: string): boolean {
+  if (!v || v.length < 3 || v.length > 45) return false;
+  if ((v.match(/\p{L}/gu)?.length ?? 0) < 3) return false;
+  if (/\d{3,}|@|€|\$|eur\b|www\.|https?:|:/i.test(v)) return false;
+  if (DEP_LABEL.test(v) || ARR_LABEL.test(v) || NOT_PLACE.test(v.replace(/[:.]$/, ''))) return false;
+  return true;
+}
+
+interface Pick { from?: string; to?: string }
+
+/** Tabelle e etichette: valore a destra dell'etichetta, o sotto nella stessa colonna. */
+function fromRows(rows: Row[]): Pick {
+  const out: Pick = {};
+  const valueFor = (ri: number, si: number, re: RegExp): string | undefined => {
+    const seg = rows[ri][si];
+    // "Da: Bologna Centrale" nello stesso segmento.
+    const rest = stripTail(seg.text.replace(re, '').trim());
+    if (rest && placey(rest)) return rest;
+    // Segmento subito a destra.
+    const right = rows[ri][si + 1];
+    if (right) {
+      const v = stripTail(right.text);
+      if (placey(v)) return v;
+    }
+    // Sotto, nella stessa colonna (fino a 4 righe).
+    for (let j = ri + 1; j < Math.min(rows.length, ri + 5); j++) {
+      const below = rows[j].find((b) => b.x < seg.x2 + 20 && b.x2 > seg.x - 20);
+      if (!below) continue;
+      const v = stripTail(below.text);
+      if (placey(v)) return v;
+      if (DEP_LABEL.test(below.text) || ARR_LABEL.test(below.text)) break;
+    }
+    return undefined;
+  };
+  for (let i = 0; i < rows.length && !(out.from && out.to); i++) {
+    rows[i].forEach((seg, si) => {
+      if (seg.text.length > 48) return;
+      if (!out.from && DEP_LABEL.test(seg.text)) out.from = valueFor(i, si, DEP_LABEL);
+      else if (!out.to && ARR_LABEL.test(seg.text)) out.to = valueFor(i, si, ARR_LABEL);
+    });
+  }
+  if (out.from && out.to && out.from !== out.to) return out;
+
+  // Righe tipo orario DB: "München Hbf | 08.12. | ab 07:28" / "Bologna C.le | 08.12. | an 14:10".
+  const res: Pick = {};
+  for (const r of rows) {
+    const joined = r.map((x) => x.text).join(' ');
+    const first = r.map((x) => stripTail(x.text)).find(placey);
+    if (!first) continue;
+    if (!res.from && /(?:^|\s)(?:ab|dep\.?|partenza|p\.)\s*\d{1,2}[:.]\d{2}(?![.\d])/i.test(joined)) res.from = first;
+    else if (res.from && !res.to && /(?:^|\s)(?:an|arr\.?|arrivo|a\.)\s*\d{1,2}[:.]\d{2}(?![.\d])/i.test(joined)) res.to = first;
+  }
+  if (res.from && res.to && res.from !== res.to) return res;
+  return {};
+}
+
+/** Valore associato a un'etichetta di tabella: nello stesso segmento, a destra o sotto nella stessa colonna. */
+function lookup(rows: Row[], label: RegExp, accept: (v: string) => string | undefined): string | undefined {
+  for (let i = 0; i < rows.length; i++) {
+    for (let si = 0; si < rows[i].length; si++) {
+      const seg = rows[i][si];
+      if (seg.text.length > 40 || !label.test(seg.text)) continue;
+      const rest = seg.text.replace(label, '').replace(/^\s*[:.]?\s*/, '');
+      const cands = [rest, rows[i][si + 1]?.text ?? ''];
+      for (let j = i + 1; j < Math.min(rows.length, i + 4); j++) {
+        const below = rows[j].find((b) => b.x < seg.x2 + 12 && b.x2 > seg.x - 12);
+        if (below) { cands.push(below.text); break; }
+      }
+      for (const c of cands) {
+        const v = c && accept(c.trim());
+        if (v) return v;
+      }
+    }
+  }
+  return undefined;
+}
+
+const timeOf = (v: string) => {
+  const m = /^(?:[a-z.]+\s*)?([01]?\d|2[0-3])[:.]([0-5]\d)(?![.\d])/i.exec(v);
+  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : undefined;
+};
+
+function timesFromRows(rows: Row[]) {
+  return {
+    dep: lookup(rows, /^(?:ora (?:di )?partenza|orario (?:di )?partenza|partenza|departure|departs?|dep\.?|abfahrt|abflug|départ|salida)\b/i, timeOf),
+    arr: lookup(rows, /^(?:ora (?:di )?arrivo|orario (?:di )?arrivo|arrivo|arrival|arrives?|arr\.?|ankunft|arrivée|llegada)\b/i, timeOf),
+  };
+}
+
+function seatFromRows(rows: Row[]): string | undefined {
+  const num = (re: RegExp) => (v: string) => (re.test(v) ? v.replace(/\s+/g, '') : undefined);
+  const parts: [string, string | undefined][] = [
+    ['Carrozza', lookup(rows, /^(?:carrozza|carr\.|wagen|wg\.|coach|voiture|coche)\s*$/i, num(/^\d{1,3}[A-Z]?$/))],
+    ['Settore', lookup(rows, /^(?:settore|sector|sektor|block|blocco)\s*$/i, num(/^[A-Z0-9]{1,4}$/))],
+    ['Fila', lookup(rows, /^(?:fila|row|reihe)\s*$/i, num(/^[A-Z0-9]{1,3}$/))],
+    ['Posto', lookup(rows, /^(?:posto|posti|platz|plätze|sitzplatz|seat|sitz|siège|asiento)\s*$/i, num(/^\d{1,3}[A-K]?(?:\s*[,/+-]\s*\d{1,3}[A-K]?)*$/))],
+  ];
+  if (!parts[3][1]) return undefined;
+  return parts.filter(([, v]) => v).map(([l, v]) => `${l} ${v}`).join(' · ');
+}
+
+function findRoute(text: string, known: string[], rows: Row[] = [], type?: string): Pick {
+  // 1. Etichette e tabelle (con le posizioni ricostruite dal PDF).
+  if (rows.length) {
+    const r = fromRows(rows);
+    if (r.from && r.to) return { from: tidy(r.from), to: tidy(r.to) };
+  }
+
+  // 1b. Etichette nel testo semplice ("Da: X" / "A: Y").
   const lab = (re: RegExp) => {
     const m = re.exec(text);
-    return m?.[1]?.trim().replace(/\s{2,}.*/, '').slice(0, 40);
+    const v = m?.[1] ? stripTail(m[1].replace(/\s{2,}.*/, '')) : undefined;
+    return v && placey(v) ? v : undefined;
   };
-  const from = lab(/(?:^|\n)\s*(?:da|from|von|partenza|departure|abfahrt|départ|origin|origine)\s*[:\-]?\s*([^\n\d]{3,40})/i);
-  const to = lab(/(?:^|\n)\s*(?:a|to|nach|arrivo|arrival|ankunft|arrivée|destination|destinazione)\s*[:\-]\s*([^\n\d]{3,40})/i);
+  const from = lab(/(?:^|\n)\s*(?:da|from|von|partenza|departure|abfahrt|départ|origin|origine)\s*[:\-]\s*([^\n]{3,60})/i);
+  const to = lab(/(?:^|\n)\s*(?:a|to|nach|arrivo|arrival|ankunft|arrivée|destination|destinazione)\s*[:\-]\s*([^\n]{3,60})/i);
   if (from && to && from !== to) return { from: tidy(from), to: tidy(to) };
 
-  // 1b. "von X nach Y" / "from X to Y" nella stessa riga.
+  // 2. "von X nach Y" / "from X to Y" nella stessa riga.
   const inline = /\b(?:von|from)\s+([A-ZÀ-Ý][\p{L} .'’()-]{1,30}?)\s+(?:nach|to)\s+([A-ZÀ-Ý][\p{L} .'’()-]{1,30}?)(?=\s{2,}|\s*[\n,;(]|\s+\d|$)/u.exec(text);
-  if (inline) return { from: tidy(inline[1]), to: tidy(inline[2]) };
+  if (inline && placey(inline[1]) && placey(inline[2])) return { from: tidy(inline[1]), to: tidy(inline[2]) };
 
-  // 2. "X → Y" / "X - Y" / "X > Y" su una riga (anche dopo "Hinfahrt:", "Andata:" …).
-  const arrow = /(?:^|\n)\s*(?:(?:[Hh]infahrt|[Rr]ückfahrt|[Aa]ndata|[Rr]itorno|[Oo]utbound|[Rr]eturn|[Ss]trecke|[Tt]ratta|[Rr]oute|[Pp]ercorso)\s*:?\s*)?([A-ZÀ-Ý][\p{L} .'’()-]{1,30}?)\s*(?:→|›|»|>|–|—| - | to | nach )\s*([A-ZÀ-Ý][\p{L} .'’()-]{1,30}?)\s*(?:\n|$)/u.exec(text);
-  if (arrow) return { from: tidy(arrow[1]), to: tidy(arrow[2]) };
+  // 3. "X → Y" su una riga (anche dopo "Hinfahrt:", "Andata:" …).
+  const arrow = /(?:^|\n)\s*(?:(?:[Hh]infahrt|[Rr]ückfahrt|[Aa]ndata|[Rr]itorno|[Oo]utbound|[Rr]eturn|[Ss]trecke|[Tt]ratta|[Rr]oute|[Pp]ercorso)\s*:?\s*)?([A-ZÀ-Ý][\p{L} .'’()-]{1,30}?)\s*(?:→|->|›|»|>|–|—| - )\s*([A-ZÀ-Ý][\p{L} .'’()-]{1,30}?)\s*(?:\n|\s{3}|$)/u.exec(text);
+  if (arrow && placey(stripTail(arrow[1])) && placey(stripTail(arrow[2]))) return { from: tidy(stripTail(arrow[1])), to: tidy(stripTail(arrow[2])) };
 
-  // 3. Codici IATA (MUC MEX, MUC-MEX, MUC/MEX).
-  const iata = /\b([A-Z]{3})\s*(?:-|–|→|\/|>|\s)\s*([A-Z]{3})\b/g;
+  // 4. Aeroporti: codici IATA noti nell'ordine in cui compaiono.
+  const air = findAirports(text);
+  if (air.length >= 2 && (type === 'volo' || type === undefined)) return { from: air[0].name, to: air[1].name };
+
+  // 5. Stazioni note, nomi "… Hbf / Centrale" e luoghi già usati, nell'ordine del testo.
+  const lower = text.toLowerCase();
+  const knownHits = known
+    .filter((k) => k.length >= 3)
+    .map((k) => ({ name: k, idx: lower.indexOf(k.toLowerCase()) }))
+    .filter((h) => h.idx >= 0);
+  const merged = [...findStations(text), ...findGenericStations(text), ...knownHits].sort((a, b) => a.idx - b.idx);
+  const names: string[] = [];
+  for (const h of merged) {
+    // Evita doppioni dello stesso luogo con nomi diversi ("Bologna" e "Bologna Centrale").
+    const key = h.name.toLowerCase().split(/[\s(]/)[0];
+    if (!names.some((n) => n.toLowerCase().split(/[\s(]/)[0] === key)) names.push(h.name);
+  }
+  if (names.length >= 2) return { from: names[0], to: names[1] };
+
+  // 6. Coppie di codici a tre lettere (MUC-MEX) anche fuori elenco.
+  const iata = /\b([A-Z]{3})\s*(?:-|–|→|\/|>)\s*([A-Z]{3})\b/g;
   let r: RegExpExecArray | null;
   while ((r = iata.exec(text))) {
     if (!NOT_IATA.has(r[1]) && !NOT_IATA.has(r[2]) && r[1] !== r[2]) return { from: r[1], to: r[2] };
   }
+  if (air.length >= 2) return { from: air[0].name, to: air[1].name };
 
-  // 3b. "MUNICH MUC  FRANKFURT FRA" (carte d'imbarco).
-  const cityCode = /\b[A-Z][A-Z .-]{2,20}?\s\(?([A-Z]{3})\)?\s+(?:→|-|–|>|TO\s)?\s*[A-Z][A-Z .-]{2,20}?\s\(?([A-Z]{3})\)?(?=\s|$)/.exec(text);
-  if (cityCode && !NOT_IATA.has(cityCode[1]) && !NOT_IATA.has(cityCode[2]) && cityCode[1] !== cityCode[2])
-    return { from: cityCode[1], to: cityCode[2] };
-
-  // 4. Luoghi già usati, nell'ordine in cui compaiono nel testo.
-  const lower = text.toLowerCase();
-  const found = known
-    .map((k) => ({ k, i: lower.indexOf(k.toLowerCase()) }))
-    .filter((x) => x.k.length >= 3 && x.i >= 0)
-    .sort((a, b) => a.i - b.i);
-  if (found.length >= 2 && found[0].k !== found[1].k) return { from: found[0].k, to: found[1].k };
-  return {};
+  // Mezzo risultato è meglio di niente: almeno la partenza o l'arrivo.
+  return { from: from ? tidy(from) : names[0], to: to ? tidy(to) : undefined };
 }
 
 const tidy = (s: string) =>
   s.replace(/\s+/g, ' ').replace(/[\s,:;.\-–]+$/, '').trim().replace(/\b(\p{L})(\p{L}*)/gu, (_, a: string, b: string) =>
     s === s.toUpperCase() ? a + b.toLowerCase() : a + b);
 
-export function guessFromText(text: string, known: string[] = []): Guess {
+export function guessFromText(text: string, known: string[] = [], rows: Row[] = []): Guess {
   const g: Guess = {};
   try {
     if (!text || text.trim().length < 10) return g;
@@ -135,11 +268,11 @@ export function guessFromText(text: string, known: string[] = []): Guess {
       const venue = /(?:^|\n)\s*([^\n]*?\b(?:arena|teatro|theater|theatre|stadio|stadion|stadium|palazzetto|forum|auditorium|halle|hall|club|museo|museum|piazza|parco|ippodromo|palasport)\b[^\n,]*)/i.exec(text);
       if (venue) g.to = tidy(venue[1]).slice(0, 50);
     } else {
-      const route = findRoute(text, known);
+      const route = findRoute(text, known, rows, g.type);
       if (route.from) g.from = route.from;
       if (route.to) g.to = route.to;
     }
-    const seat = findSeat(text);
+    const seat = findSeat(text) ?? (rows.length ? seatFromRows(rows) : undefined);
     if (seat) g.seat = seat;
     const num = findNumber(text, g.type);
     if (num) g.note = num;
@@ -163,11 +296,13 @@ export function guessFromText(text: string, known: string[] = []): Guess {
       // (?![\d.]) evita di leggere "08.12.2026" come orario 08:12.
       const T = String.raw`[^\d\n]{0,20}([01]?\d|2[0-3])[:.]([0-5]\d)(?![\d.])`;
       const ev = g.type === 'evento';
-      const dep = (ev
+      const colT: { dep?: string; arr?: string } = rows.length ? timesFromRows(rows) : {};
+      const asHit = (t?: string) => (t ? { idx: d.idx + 1, h: +t.slice(0, 2), min: +t.slice(3) } : undefined);
+      const dep = (ev ? undefined : asHit(colT.dep)) ?? (ev
         ? labeled(new RegExp(String.raw`(?:inizio|beginn|start|show|ore)` + T, 'i')) ??
           labeled(new RegExp(String.raw`(?:apertura porte|doors|einlass)` + T, 'i'))
         : labeled(new RegExp(String.raw`(?:partenza|part\.|departure|departs?|dep\.|abfahrt|abflug|ab\b|départ|salida)` + T, 'i'))) ?? near[0];
-      const arr = labeled(new RegExp(String.raw`(?:arrivo|arr\.|arrival|arrives?|ankunft|an\b|arrivée|llegada|fine|ende)` + T, 'i'));
+      const arr = (ev ? undefined : asHit(colT.arr)) ?? labeled(new RegExp(String.raw`(?:arrivo|arr\.|arrival|arrives?|ankunft|an\b|arrivée|llegada|fine|ende)` + T, 'i'));
       if (dep) {
         g.departAt = `${day}T${pad(dep.h)}:${pad(dep.min)}`;
         const depMin = dep.h * 60 + dep.min;

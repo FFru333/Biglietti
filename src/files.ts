@@ -1,6 +1,8 @@
 // Elaborazione dei file allegati: render della prima pagina dei PDF e normalizzazione immagini.
 // pdf.js viene caricato solo quando serve (import dinamico), ma resta nel precache del service worker.
 
+import { buildRows, rowsToText, type Row } from './layout';
+
 type PdfJs = typeof import('pdfjs-dist');
 let pdfjsP: Promise<PdfJs> | null = null;
 
@@ -26,6 +28,8 @@ export interface Processed {
   renders?: Blob[];
   thumb?: Blob;
   text: string;
+  /** Righe ricostruite con le posizioni (per leggere le tabelle). */
+  rows?: Row[];
 }
 
 const MAX_PAGES = 8;
@@ -45,9 +49,6 @@ export async function processFile(file: Blob & { name?: string }, timeoutMs = 30
   return Promise.race([work.catch(() => ({ text: '' })), timeout]);
 }
 
-const pageText = (tc: { items: unknown[] }) =>
-  // Riga per riga: pdf.js segnala gli a capo con hasEOL.
-  (tc.items as { str?: string; hasEOL?: boolean }[]).map((i) => (i.str !== undefined ? i.str + (i.hasEOL ? '\n' : ' ') : '')).join('');
 
 async function processPdf(file: Blob): Promise<Processed> {
   const lib = await pdfjs();
@@ -62,10 +63,10 @@ async function processPdf(file: Blob): Promise<Processed> {
   const doc = await task.promise;
   try {
     const renders: Blob[] = [];
-    const texts: string[] = [];
+    const rows: Row[] = [];
     for (let n = 1; n <= Math.min(doc.numPages, MAX_PAGES); n++) {
       const page = await doc.getPage(n);
-      try { texts.push(pageText(await page.getTextContent())); } catch { /* testo non disponibile */ }
+      try { rows.push(...buildRows((await page.getTextContent()).items)); } catch { /* testo non disponibile */ }
       const base = page.getViewport({ scale: 1 });
       // ~2000px di larghezza: QR/Aztec nitidi anche con zoom.
       // Limite di area del canvas su iOS (~16 Mpx): restiamo sotto i 12.
@@ -86,7 +87,7 @@ async function processPdf(file: Blob): Promise<Processed> {
       canvas.width = canvas.height = 0;
       page.cleanup();
     }
-    return { renders, text: texts.join('\n') };
+    return { renders, rows, text: rowsToText(rows) };
   } finally {
     task.destroy();
   }
